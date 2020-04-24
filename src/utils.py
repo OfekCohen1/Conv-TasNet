@@ -38,6 +38,7 @@ def overlap_and_add(signal, frame_step):
 
     frame = torch.arange(0, output_subframes).unfold(0, subframes_per_frame, subframe_step)
     frame = signal.new_tensor(frame).long()  # signal may in GPU or CPU
+    #frame = frame.clone().detach().long()
     frame = frame.contiguous().view(-1)
 
     result = signal.new_zeros(*outer_dimensions, output_subframes, subframe_length)
@@ -59,8 +60,8 @@ def remove_pad(inputs, inputs_lengths):
     if dim == 3:
         C = inputs.size(1)
     for input, length in zip(inputs, inputs_lengths):
-        if dim == 3: # [B, C, T]
-            results.append(input[:,:length].view(C, -1).cpu().numpy())
+        if dim == 3:  # [B, C, T]
+            results.append(input[:, :length].view(C, -1).cpu().numpy())
         elif dim == 2:  # [B, T]
             results.append(input[:length].view(-1).cpu().numpy())
     return results

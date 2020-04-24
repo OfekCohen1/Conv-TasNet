@@ -3,40 +3,46 @@
 
 import os
 import time
-
+from tqdm import tqdm
+import visdom
 import torch
 
-from pit_criterion import cal_loss
+from src.pit_criterion import cal_loss
 
 
 class Solver(object):
-    
-    def __init__(self, data, model, optimizer, args):
+
+    def __init__(self, data, model, optimizer, arg_solver):
+
+        (use_cuda, epochs, half_lr, early_stop, max_grad_norm, save_folder, enable_checkpoint, continue_from,
+         model_path, print_freq, visdom_enabled, visdom_epoch, visdom_id) = arg_solver
+
         self.tr_loader = data['tr_loader']
         self.cv_loader = data['cv_loader']
         self.model = model
         self.optimizer = optimizer
 
         # Training config
-        self.use_cuda = args.use_cuda
-        self.epochs = args.epochs
-        self.half_lr = args.half_lr
-        self.early_stop = args.early_stop
-        self.max_norm = args.max_norm
+        self.use_cuda = use_cuda
+        self.epochs = epochs
+        self.half_lr = half_lr
+        self.early_stop = early_stop
+        self.max_norm = max_grad_norm
         # save and load model
-        self.save_folder = args.save_folder
-        self.checkpoint = args.checkpoint
-        self.continue_from = args.continue_from
-        self.model_path = args.model_path
+        self.save_folder = save_folder
+        self.enable_checkpoint = enable_checkpoint
+        self.continue_from = continue_from
+        self.model_path = model_path
         # logging
-        self.print_freq = args.print_freq
+        self.print_freq = print_freq
         # visualizing loss using visdom
+        # TODO: Change size of tr_loss and cv_loss since my epochs are bigger
         self.tr_loss = torch.Tensor(self.epochs)
         self.cv_loss = torch.Tensor(self.epochs)
-        self.visdom = args.visdom
-        self.visdom_epoch = args.visdom_epoch
-        self.visdom_id = args.visdom_id
-        if self.visdom:
+        self.visdom_enabled = visdom_enabled
+        self.visdom_epoch = visdom_epoch
+        self.visdom_id = visdom_id
+        if self.visdom_enabled:
             from visdom import Visdom
             self.vis = Visdom(env=self.visdom_id)
             self.vis_opts = dict(title=self.visdom_id,
@@ -55,6 +61,9 @@ class Solver(object):
             self.model.module.load_state_dict(package['state_dict'])
             self.optimizer.load_state_dict(package['optim_dict'])
             self.start_epoch = int(package.get('epoch', 1))
+            self.epochs = self.epochs + self.start_epoch + 1
+            self.tr_loss = torch.Tensor(self.epochs)
+            self.cv_loss = torch.Tensor(self.epochs)
             self.tr_loss[:self.start_epoch] = package['tr_loss'][:self.start_epoch]
             self.cv_loss[:self.start_epoch] = package['cv_loss'][:self.start_epoch]
         else:
@@ -77,18 +86,19 @@ class Solver(object):
             print('-' * 85)
             print('Train Summary | End of Epoch {0} | Time {1:.2f}s | '
                   'Train Loss {2:.3f}'.format(
-                      epoch + 1, time.time() - start, tr_avg_loss))
+                epoch + 1, time.time() - start, tr_avg_loss))
             print('-' * 85)
 
             # Save model each epoch
-            if self.checkpoint:
-                file_path = os.path.join(
-                    self.save_folder, 'epoch%d.pth.tar' % (epoch + 1))
+            # TODO: Change to save less than each epoch
+            if self.enable_checkpoint:
+                file_path = os.path.join(self.save_folder,
+                                         "checkpoint_models",'epoch%d.pth.tar' % (epoch + 1))
                 torch.save(self.model.module.serialize(self.model.module,
                                                        self.optimizer, epoch + 1,
                                                        tr_loss=self.tr_loss,
                                                        cv_loss=self.cv_loss),
-                           file_path)
+                                                        file_path)
                 print('Saving checkpoint model to %s' % file_path)
 
             # Cross validation
@@ -98,7 +108,7 @@ class Solver(object):
             print('-' * 85)
             print('Valid Summary | End of Epoch {0} | Time {1:.2f}s | '
                   'Valid Loss {2:.3f}'.format(
-                      epoch + 1, time.time() - start, val_loss))
+                epoch + 1, time.time() - start, val_loss))
             print('-' * 85)
 
             # Adjust learning rate (halving)
@@ -107,8 +117,8 @@ class Solver(object):
                     self.val_no_impv += 1
                     if self.val_no_impv >= 3:
                         self.halving = True
-                    if self.val_no_impv >= 10 and self.early_stop:
-                        print("No imporvement for 10 epochs, early stopping.")
+                    if self.val_no_impv >= 7 and self.early_stop:
+                        print("No imporvement for 7 epochs, early stopping.")
                         break
                 else:
                     self.val_no_impv = 0
@@ -133,10 +143,10 @@ class Solver(object):
                                                        tr_loss=self.tr_loss,
                                                        cv_loss=self.cv_loss),
                            file_path)
-                print("Find better validated model, saving to %s" % file_path)
+                print("Found better validated model, saving to %s" % file_path)
 
             # visualizing loss using visdom
-            if self.visdom:
+            if self.visdom_enabled:
                 x_axis = self.vis_epochs[0:epoch + 1]
                 y_axis = torch.stack(
                     (self.tr_loss[0:epoch + 1], self.cv_loss[0:epoch + 1]), dim=1)
@@ -158,7 +168,7 @@ class Solver(object):
     def _run_one_epoch(self, epoch, cross_valid=False):
         start = time.time()
         total_loss = 0
-
+        i = 0
         data_loader = self.tr_loader if not cross_valid else self.cv_loader
 
         # visualizing loss using visdom
@@ -168,9 +178,9 @@ class Solver(object):
             vis_window_epoch = None
             vis_iters = torch.arange(1, len(data_loader) + 1)
             vis_iters_loss = torch.Tensor(len(data_loader))
+        for data_package in tqdm(data_loader):
 
-        for i, (data) in enumerate(data_loader):
-            padded_mixture, mixture_lengths, padded_source = data
+            padded_mixture, mixture_lengths, padded_source = data_package
             if self.use_cuda:
                 padded_mixture = padded_mixture.cuda()
                 mixture_lengths = mixture_lengths.cuda()
@@ -190,21 +200,22 @@ class Solver(object):
             if i % self.print_freq == 0:
                 print('Epoch {0} | Iter {1} | Average Loss {2:.3f} | '
                       'Current Loss {3:.6f} | {4:.1f} ms/batch'.format(
-                          epoch + 1, i + 1, total_loss / (i + 1),
-                          loss.item(), 1000 * (time.time() - start) / (i + 1)),
-                      flush=True)
+                    epoch + 1, i + 1, total_loss / (i + 1),
+                    loss.item(), 1000 * (time.time() - start) / (i + 1)),
+                    flush=True)
 
             # visualizing loss using visdom
             if self.visdom_epoch and not cross_valid:
                 vis_iters_loss[i] = loss.item()
                 if i % self.print_freq == 0:
-                    x_axis = vis_iters[:i+1]
-                    y_axis = vis_iters_loss[:i+1]
+                    x_axis = vis_iters[:i + 1]
+                    y_axis = vis_iters_loss[:i + 1]
                     if vis_window_epoch is None:
                         vis_window_epoch = self.vis.line(X=x_axis, Y=y_axis,
                                                          opts=vis_opts_epoch)
                     else:
                         self.vis.line(X=x_axis, Y=y_axis, win=vis_window_epoch,
                                       update='replace')
+            i += 1
 
         return total_loss / (i + 1)
