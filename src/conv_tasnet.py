@@ -97,6 +97,7 @@ class ConvTasNet(nn.Module):
 class Encoder(nn.Module):
     """Estimation of the nonnegative mixture weight by a 1-D conv layer.
     """
+
     def __init__(self, L, N):
         super(Encoder, self).__init__()
         # Hyper-parameter
@@ -120,6 +121,7 @@ class Encoder(nn.Module):
         mixture_w = functional.relu(self.conv1d_U(mix_wave))  # [M, N, K]
         return mixture_w
 
+
 class Decoder(nn.Module):
     def __init__(self, N, L):
         super(Decoder, self).__init__()
@@ -142,7 +144,7 @@ class Decoder(nn.Module):
         # S = DV
         est_source = self.basis_signals(source_w)  # [M, C, K, L] - K vectors, each vector length L
         # we now have K vectors of length L with overlap of L/2 cause of stride. now to fix it:
-        est_source = overlap_and_add(est_source, self.L//2)  # M x C x T
+        est_source = overlap_and_add(est_source, self.L // 2)  # M x C x T
         return est_source
 
 
@@ -168,32 +170,29 @@ class TemporalConvNet(nn.Module):
         self.mask_nonlinear = mask_nonlinear
         # Components
         # [M, N, K] -> [M, N, K]
-        # TODO: Check why this is channelwise and not global
-        layer_norm = ChannelwiseLayerNorm(N)
+        # TODO: I changed here from layer norm to global norm
+        self.layer_norm = chose_norm(norm_type, N)
         # [M, N, K] -> [M, B, K]
-        bottleneck_conv1x1 = nn.Conv1d(N, B, 1, bias=False)
+        self.bottleneck_conv1x1 = nn.Conv1d(N, B, 1, bias=False)
         # [M, B, K] -> [M, B, K]
-        repeats = []
-        # TODO: No skip connections, and no RELU before mask_1x1_conv in this implementation (there should be)
+        # self.temporal_conv_blocks = []  # List of conv1D blocks
+        self.temporal_conv_blocks = nn.ModuleList()
         for r in range(R):
-            blocks = []
             for x in range(X):
-                dilation = 2**x
+                dilation = 2 ** x
                 padding = (P - 1) * dilation if causal else (P - 1) * dilation // 2
-                blocks += [TemporalBlock(B, H, P, stride=1,
-                                         padding=padding,
-                                         dilation=dilation,
-                                         norm_type=norm_type,
-                                         causal=causal)]
-            repeats += [nn.Sequential(*blocks)]
-        temporal_conv_net = nn.Sequential(*repeats)
+                # self.temporal_conv_blocks += [TemporalBlock(B, H, P, stride=1,
+                #                                             padding=padding,
+                #                                             dilation=dilation,
+                #                                             norm_type=norm_type,
+                #                                             causal=causal)]
+                self.temporal_conv_blocks.append(TemporalBlock(B, H, P, stride=1,
+                                                            padding=padding,
+                                                            dilation=dilation,
+                                                            norm_type=norm_type,
+                                                            causal=causal))
         # [M, B, K] -> [M, C*N, K]
-        mask_conv1x1 = nn.Conv1d(B, C*N, 1, bias=False)
-        # Put together
-        self.network = nn.Sequential(layer_norm,
-                                     bottleneck_conv1x1,
-                                     temporal_conv_net,
-                                     mask_conv1x1)
+        self.mask_conv1x1 = nn.Conv1d(B, C * N, 1, bias=False)
 
     def forward(self, mixture_w):
         """
@@ -203,9 +202,20 @@ class TemporalConvNet(nn.Module):
         returns:
             est_mask: [M, C, N, K]
         """
+        # [M, N, K]
         M, N, K = mixture_w.size()
-        score = self.network(mixture_w)  # [M, N, K] -> [M, C*N, K]
-        score = score.view(M, self.C, N, K) # [M, C*N, K] -> [M, C, N, K]
+        mixture = self.layer_norm(mixture_w)
+        mixture = self.bottleneck_conv1x1(mixture)
+        skip_connections = 0
+        for conv_block in self.temporal_conv_blocks:
+            mixture, skip = conv_block(mixture)
+            skip_connections += skip
+            # mixture = conv_block(mixture)
+        mixture = mixture + skip_connections
+        score = self.mask_conv1x1(mixture)  # now it's  [M, C*N, K]
+
+        score = score.view(M, self.C, N, K)  # [M, C*N, K] -> [M, C, N, K]
+        # TODO: Might want to change to sigmoid here
         if self.mask_nonlinear == 'softmax':
             est_mask = functional.softmax(score, dim=1)
         elif self.mask_nonlinear == 'relu':
@@ -216,19 +226,23 @@ class TemporalConvNet(nn.Module):
 
 
 class TemporalBlock(nn.Module):
+    """ Returns (output, skip connection) """
+
     def __init__(self, in_channels, out_channels, kernel_size,
                  stride, padding, dilation, norm_type="gLN", causal=False):
         super(TemporalBlock, self).__init__()
         # [M, B, K] -> [M, H, K]
-        conv1x1 = nn.Conv1d(in_channels, out_channels, 1, bias=False)
-        prelu = nn.PReLU()
-        norm = chose_norm(norm_type, out_channels)
-        # [M, H, K] -> [M, B, K]
-        dsconv = DepthwiseSeparableConv(out_channels, in_channels, kernel_size,
+        dsconv = DepthwiseSeparableConv(in_channels, out_channels, kernel_size,
                                         stride, padding, dilation, norm_type,
                                         causal)
+        # [M, H, K] -> [M, B, K]
+        # I assume that B = Sc for simplicity
+        conv1x1_output = nn.Conv1d(out_channels, in_channels, 1, bias=False)
+        conv1x1_sc = nn.Conv1d(out_channels, in_channels, 1, bias=False)
+
         # Put together
-        self.net = nn.Sequential(conv1x1, prelu, norm, dsconv)
+        self.output_block = nn.Sequential(dsconv, conv1x1_output)
+        self.skip_connection_block = nn.Sequential(dsconv, conv1x1_sc)
 
     def forward(self, x):
         """
@@ -238,9 +252,12 @@ class TemporalBlock(nn.Module):
             [M, B, K]
         """
         residual = x
-        out = self.net(x)
+        out = self.output_block(x)
+        out = out + residual
+        skip_connection = self.skip_connection_block(x)
         # TODO: when P = 3 here works fine, but when P = 2 maybe need to pad?
-        return out + residual  # look like w/o F.relu is better than w/ F.relu
+        return out, skip_connection  # look like w/o F.relu is better than w/ F.relu
+        # return out
         # return F.relu(out + residual)
 
 
@@ -249,24 +266,28 @@ class DepthwiseSeparableConv(nn.Module):
                  stride, padding, dilation, norm_type="gLN", causal=False):
         super(DepthwiseSeparableConv, self).__init__()
         # Use `groups` option to implement depthwise convolution
-        # [M, H, K] -> [M, H, K]
-        depthwise_conv = nn.Conv1d(in_channels, in_channels, kernel_size,
-                                   stride=stride, padding=padding,
-                                   dilation=dilation, groups=in_channels,
-                                   bias=False)
+        # [M, B, K] -> [M, H, K]
+        pointwise_conv = nn.Conv1d(in_channels, out_channels, 1, bias=False)
+
         if causal:
             chomp = Chomp1d(padding)
-        prelu = nn.PReLU()
-        norm = chose_norm(norm_type, in_channels)
-        # [M, H, K] -> [M, B, K]
-        pointwise_conv = nn.Conv1d(in_channels, out_channels, 1, bias=False)
+        pointwise_prelu = nn.PReLU()
+        depthwise_prelu = nn.PReLU()
+        pointwise_norm = chose_norm(norm_type, out_channels)
+        depthwise_norm = chose_norm(norm_type, out_channels)
+        # [M, H, K] -> [M, H, K]
+        depthwise_conv = nn.Conv1d(out_channels, out_channels, kernel_size,
+                                   stride=stride, padding=padding,
+                                   dilation=dilation, groups=out_channels,
+                                   bias=False)
         # Put together
+        # TODO: Not sure where to chomp here, since i change the order of stuff (causal might not work)
         if causal:
-            self.net = nn.Sequential(depthwise_conv, chomp, prelu, norm,
-                                     pointwise_conv)
+            self.net = nn.Sequential(chomp, pointwise_conv, pointwise_prelu, pointwise_norm,
+                                     depthwise_conv, depthwise_prelu, depthwise_norm)
         else:
-            self.net = nn.Sequential(depthwise_conv, prelu, norm,
-                                     pointwise_conv)
+            self.net = nn.Sequential(pointwise_conv, pointwise_prelu, pointwise_norm,
+                                     depthwise_conv, depthwise_prelu, depthwise_norm)
 
     def forward(self, x):
         """
@@ -281,6 +302,7 @@ class DepthwiseSeparableConv(nn.Module):
 class Chomp1d(nn.Module):
     """To ensure the output length is the same as the input.
     """
+
     def __init__(self, chomp_size):
         super(Chomp1d, self).__init__()
         self.chomp_size = chomp_size
@@ -303,7 +325,7 @@ def chose_norm(norm_type, channel_size):
         return GlobalLayerNorm(channel_size)
     elif norm_type == "cLN":
         return ChannelwiseLayerNorm(channel_size)
-    else: # norm_type == "BN":
+    else:  # norm_type == "BN":
         # Given input (M, C, K), nn.BatchNorm1d(C) will accumulate statics
         # along M and K, so this BN usage is right.
         return nn.BatchNorm1d(channel_size)
@@ -312,10 +334,11 @@ def chose_norm(norm_type, channel_size):
 # TODO: Use nn.LayerNorm to impl cLN to speed up
 class ChannelwiseLayerNorm(nn.Module):
     """Channel-wise Layer Normalization (cLN)"""
+
     def __init__(self, channel_size):
         super(ChannelwiseLayerNorm, self).__init__()
         self.gamma = nn.Parameter(torch.Tensor(1, channel_size, 1))  # [1, N, 1]
-        self.beta = nn.Parameter(torch.Tensor(1, channel_size,1 ))  # [1, N, 1]
+        self.beta = nn.Parameter(torch.Tensor(1, channel_size, 1))  # [1, N, 1]
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -337,10 +360,11 @@ class ChannelwiseLayerNorm(nn.Module):
 
 class GlobalLayerNorm(nn.Module):
     """Global Layer Normalization (gLN)"""
+
     def __init__(self, channel_size):
         super(GlobalLayerNorm, self).__init__()
         self.gamma = nn.Parameter(torch.Tensor(1, channel_size, 1))  # [1, N, 1]
-        self.beta = nn.Parameter(torch.Tensor(1, channel_size,1 ))  # [1, N, 1]
+        self.beta = nn.Parameter(torch.Tensor(1, channel_size, 1))  # [1, N, 1]
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -355,8 +379,8 @@ class GlobalLayerNorm(nn.Module):
             gLN_y: [M, N, K]
         """
         # TODO: in torch 1.0, torch.mean() support dim list
-        mean = y.mean(dim=1, keepdim=True).mean(dim=2, keepdim=True) #[M, 1, 1]
-        var = (torch.pow(y-mean, 2)).mean(dim=1, keepdim=True).mean(dim=2, keepdim=True)
+        mean = y.mean(dim=1, keepdim=True).mean(dim=2, keepdim=True)  # [M, 1, 1]
+        var = (torch.pow(y - mean, 2)).mean(dim=1, keepdim=True).mean(dim=2, keepdim=True)
         gLN_y = self.gamma * (y - mean) / torch.pow(var + EPS, 0.5) + self.beta
         return gLN_y
 
@@ -364,7 +388,7 @@ class GlobalLayerNorm(nn.Module):
 if __name__ == "__main__":
     torch.manual_seed(123)
     M, N, L, T = 4, 256, 20, 32000
-    K = 2*T//L-1
+    K = 2 * T // L - 1
     B, H, P, X, R, C, norm_type, causal = 256, 512, 3, 8, 4, 2, "gLN", False
     mixture = torch.randint(3, (M, T))
     # test Encoder
@@ -392,4 +416,3 @@ if __name__ == "__main__":
     est_source = conv_tasnet(mixture)
     print('est_source', est_source)
     print('est_source size', est_source.size())
-

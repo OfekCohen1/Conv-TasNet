@@ -40,13 +40,13 @@ ngpu = 1  # TODO: What is this
 # if __name__ == '__main__':
 
 # preprocess(data_dir, json_dir, sample_rate)
-epochs = 30
+epochs = 80
 
-batch_size = 3
+batch_size = 2
 num_workers = 4
-max_hours = 0.1
+max_hours = 50
 # continue_from = save_folder + "/speech_seperation_first_try.pth"
-model_path = "test.pth"
+model_path = "speech_separation_with_skip_batchsize_2.pth"
 # dataset = AudioDataset(train_dir, batch_size, max_hours=30)
 # dataloader = AudioDataLoader(dataset, batch_size=1, num_workers=num_workers)
 # for data in (dataloader):

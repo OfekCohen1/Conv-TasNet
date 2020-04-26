@@ -61,16 +61,16 @@ class Solver(object):
             self.model.module.load_state_dict(package['state_dict'])
             self.optimizer.load_state_dict(package['optim_dict'])
             self.start_epoch = int(package.get('epoch', 1))
-            self.epochs = self.epochs + self.start_epoch + 1
-            self.tr_loss = torch.Tensor(self.epochs)
+            self.epochs = self.epochs + self.start_epoch
+            self.tr_loss = torch.Tensor(self.epochs)  # Fix number of epochs
             self.cv_loss = torch.Tensor(self.epochs)
+            self.vis_epochs = torch.arange(1, self.epochs + 1)
             self.tr_loss[:self.start_epoch] = package['tr_loss'][:self.start_epoch]
             self.cv_loss[:self.start_epoch] = package['cv_loss'][:self.start_epoch]
         else:
             self.start_epoch = 0
         # Create save folder
         os.makedirs(self.save_folder, exist_ok=True)
-        self.prev_val_loss = float("inf")
         self.best_val_loss = float("inf")
         self.halving = False
         self.val_no_impv = 0
@@ -104,7 +104,8 @@ class Solver(object):
             # Cross validation
             print('Cross validation...')
             self.model.eval()  # Turn off Batchnorm & Dropout
-            val_loss = self._run_one_epoch(epoch, cross_valid=True)
+            with torch.no_grad():
+                val_loss = self._run_one_epoch(epoch, cross_valid=True)
             print('-' * 85)
             print('Valid Summary | End of Epoch {0} | Time {1:.2f}s | '
                   'Valid Loss {2:.3f}'.format(
@@ -113,9 +114,9 @@ class Solver(object):
 
             # Adjust learning rate (halving)
             if self.half_lr:
-                if val_loss >= self.prev_val_loss:
+                if val_loss >= self.best_val_loss:
                     self.val_no_impv += 1
-                    if self.val_no_impv >= 3:
+                    if self.val_no_impv == 3:
                         self.halving = True
                     if self.val_no_impv >= 7 and self.early_stop:
                         print("No imporvement for 7 epochs, early stopping.")
@@ -130,7 +131,6 @@ class Solver(object):
                 print('Learning rate adjusted to: {lr:.6f}'.format(
                     lr=optim_state['param_groups'][0]['lr']))
                 self.halving = False
-            self.prev_val_loss = val_loss
 
             # Save the best model
             self.tr_loss[epoch] = tr_avg_loss
@@ -186,6 +186,7 @@ class Solver(object):
                 mixture_lengths = mixture_lengths.cuda()
                 padded_source = padded_source.cuda()
             estimate_source = self.model(padded_mixture)
+
             loss, max_snr, estimate_source, reorder_estimate_source = \
                 cal_loss(padded_source, estimate_source, mixture_lengths)
             if not cross_valid:
@@ -195,14 +196,16 @@ class Solver(object):
                                                self.max_norm)
                 self.optimizer.step()
 
+            # import GPUtil
+            # print(GPUtil.showUtilization())
             total_loss += loss.item()
 
-            if i % self.print_freq == 0:
-                print('Epoch {0} | Iter {1} | Average Loss {2:.3f} | '
-                      'Current Loss {3:.6f} | {4:.1f} ms/batch'.format(
-                    epoch + 1, i + 1, total_loss / (i + 1),
-                    loss.item(), 1000 * (time.time() - start) / (i + 1)),
-                    flush=True)
+            # if i % self.print_freq == 0:
+            #     print('Epoch {0} | Iter {1} | Average Loss {2:.3f} | '
+            #           'Current Loss {3:.6f} | {4:.1f} ms/batch'.format(
+            #         epoch + 1, i + 1, total_loss / (i + 1),
+            #         loss.item(), 1000 * (time.time() - start) / (i + 1)),
+            #         flush=True)
 
             # visualizing loss using visdom
             if self.visdom_epoch and not cross_valid:
