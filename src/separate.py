@@ -21,7 +21,6 @@ def separate(model_path, mix_dir, mix_json, out_dir, use_cuda, sample_rate, batc
 
     # Load model
     model = ConvTasNet.load_model(model_path)
-    print(model)
     model.eval()
     if use_cuda:
         model.cuda()
@@ -58,13 +57,13 @@ def separate(model_path, mix_dir, mix_json, out_dir, use_cuda, sample_rate, batc
 
 
 if __name__ == '__main__':
-    model_path = ""  # TODO: Add this
-    mix_dir = ""  # TODO: Add this, indlues dir for wav files
-    mix_json = "" # TODO: Includes json file
-    out_dir = ""
+    model_path = "../egs/models/test.pth"  # TODO: Add this
+    mix_dir = "../egs/separate"  # TODO: Add this, indlues dir for wav files
+    mix_json = ""
+    out_dir = "../egs/separate/Separated_results"
     use_cuda = 1
     sample_rate = 8000
-    batch_size = 4
+    batch_size = 1
 
     separate(model_path, mix_dir, mix_json, out_dir, use_cuda, sample_rate, batch_size)
 

@@ -28,7 +28,7 @@ def preprocess_one_dir(data_dir, json_dir, json_filename, sample_rate=8000):
 
 def preprocess(data_dir, json_dir, sample_rate):
     for data_type in ['tr', 'cv', 'tt']:
-        for speaker in ['mix', 's1', 's2']:
+        for speaker in ['mix', 'clean', 'noise']:
             preprocess_one_dir(os.path.join(data_dir, data_type, speaker),
                                os.path.join(json_dir, data_type),
                                speaker,
@@ -37,7 +37,7 @@ def preprocess(data_dir, json_dir, sample_rate):
 
 if __name__ == "__main__":
 
-    data_dir = "../egs/wsj0-mix/2speakers/wav8k/min/"  # TODO: Check if I should use min or max
-    json_dir = "../egs/wsj0-mix/2speakers/wav8k/min/"
+    data_dir = "../egs/SE_dataset"  # TODO: Check if I should use min or max
+    json_dir = "../egs/SE_dataset"
     sample_rate = 8000
     preprocess(data_dir, json_dir, sample_rate)

@@ -13,8 +13,8 @@ from src.data import AudioDataset, AudioDataLoader
 
 # To open visdom, run this command: "python -m visdom.server", and then open http://localhost:8097
 
-data_dir = "../egs/wsj0-mix/2speakers/wav8k/min/"
-json_dir = "../egs/wsj0-mix/2speakers/wav8k/min/"
+data_dir = "../egs/SE_dataset/"
+json_dir = "../egs/SE_dataset/"
 
 train_dir = data_dir + "tr"
 valid_dir = data_dir + "cv"
@@ -29,24 +29,21 @@ epochs = 50  # TODO: Change this before run
 
 # save and visualize
 continue_from = ""
-print_freq = 10
-visdom = 0
-visdom_epoch = 0
-visdom_id = "Conv-TasNet Training"
-# evaluate
-ev_use_cuda = 0
-cal_sdr = 1
+model_path = "test.pth"
 
 ngpu = 1  # TODO: What is this
 
 if __name__ == '__main__':
     # preprocess(data_dir, json_dir, sample_rate)
     #
-    batch_size = 3
-    num_workers = 4
-    dataset = AudioDataset(train_dir, batch_size)
-    dataloader = AudioDataLoader(dataset, batch_size=1, num_workers=num_workers)
-    for data in (dataloader):
-        print('hello')
+    batch_size = 1
+    num_workers = 0
+    max_hours = 0.05
 
-    # train(data_dir, epochs)
+    dataset = AudioDataset(train_dir, batch_size, segment=4, max_hours=max_hours)
+    dataloader = AudioDataLoader(dataset, batch_size=1, num_workers=num_workers)
+    i = 0
+    for data in dataloader:
+        i += 1
+    print(i)
+    # train(data_dir, epochs, batch_size, model_path=model_path, max_hours=max_hours, continue_from= continue_from)

@@ -16,12 +16,37 @@ def cal_loss(source, estimate_source, source_lengths):
         estimate_source: [B, C, T]
         source_lengths: [B]
     """
-    max_snr, perms, max_snr_idx = cal_si_snr_with_pit(source,
-                                                      estimate_source,
-                                                      source_lengths)
-    loss = 0 - torch.mean(max_snr)
-    reorder_estimate_source = reorder_source(estimate_source, perms, max_snr_idx)
-    return loss, max_snr, estimate_source, reorder_estimate_source
+    # max_snr, perms, max_snr_idx = cal_si_snr_with_pit(source,
+    #                                                   estimate_source,
+    #                                                   source_lengths)
+    # loss = 0 - torch.mean(max_snr)
+    # reorder_estimate_source = reorder_source(estimate_source, perms, max_snr_idx)
+    # return loss, max_snr, estimate_source, reorder_estimate_source
+    si_sdr = calc_si_sdr(source, estimate_source, source_lengths)
+    return 0.0 - si_sdr
+
+def calc_si_sdr(source, estimate_source, source_lengths):
+    """ SI-SDR for Speech Enhancement from paper https://arxiv.org/abs/1909.01019 """
+
+    assert source.size() == estimate_source.size()
+    B, T = source.size()
+
+    # Step 1. Zero-mean norm
+    num_samples = source_lengths.view(-1, 1).float()  # [B, 1]
+    mean_target = torch.sum(source, dim=1, keepdim=True) / num_samples
+    mean_estimate = torch.sum(estimate_source, dim=1, keepdim=True) / num_samples
+    zero_mean_target = source - mean_target
+    zero_mean_estimate = estimate_source - mean_estimate
+    #
+    cross_energy = torch.sum(zero_mean_target*zero_mean_estimate, dim=1, keepdim=True)
+    target_energy = torch.sum(zero_mean_target ** 2, dim=1, keepdim=True) + EPS
+    estimate_energy = torch.sum(zero_mean_estimate ** 2, dim=1, keepdim=True) + EPS
+    # si_sdr = 10 * torch.log10(cross_energy/ (target_energy * estimate_energy - cross_energy) + EPS)
+    alpha = cross_energy / target_energy
+    si_sdr = torch.sum((alpha * zero_mean_target) ** 2, dim= 1, keepdim=True) /  \
+             torch.sum((alpha * zero_mean_target - zero_mean_estimate) ** 2, dim= 1, keepdim=True)
+    si_sdr = 10 * torch.log10(si_sdr)
+    return si_sdr
 
 
 def cal_si_snr_with_pit(source, estimate_source, source_lengths):
@@ -99,19 +124,19 @@ def reorder_source(source, perms, max_snr_idx):
     return reorder_source
 
 
-def get_mask(source, source_lengths):
-    """
-    Args:
-        source: [B, C, T]
-        source_lengths: [B]
-    Returns:
-        mask: [B, 1, T]
-    """
-    B, _, T = source.size()
-    mask = source.new_ones((B, 1, T))
-    for i in range(B):
-        mask[i, :, source_lengths[i]:] = 0
-    return mask
+# def get_mask(source, source_lengths):
+#     """
+#     Args:
+#         source: [B, C, T]
+#         source_lengths: [B]
+#     Returns:
+#         mask: [B, 1, T]
+#     """
+#     B, T = source.size()
+#     mask = source.new_ones((B, 1, T))
+#     for i in range(B):
+#         mask[i, :, source_lengths[i]:] = 0
+#     return mask
 
 
 if __name__ == "__main__":

@@ -115,7 +115,6 @@ class Encoder(nn.Module):
         # L is the length of each mini frame, and K is the number of frames. conv basically
         # transfers from L length base to N length base, using N vectors (N dimensions).
         # one conv filter is basically taking one basis vector on all K frames
-        # TODO: Might not need relu for encoder
         mix_wave = torch.unsqueeze(mix_wave, 1)  # [M, 1, T]
         mixture_w = functional.relu(self.conv1d_U(mix_wave))  # [M, N, K]
         return mixture_w
@@ -168,13 +167,11 @@ class TemporalConvNet(nn.Module):
         self.mask_nonlinear = mask_nonlinear
         # Components
         # [M, N, K] -> [M, N, K]
-        # TODO: Check why this is channelwise and not global
-        layer_norm = ChannelwiseLayerNorm(N)
+        layer_norm = chose_norm(norm_type,N)
         # [M, N, K] -> [M, B, K]
         bottleneck_conv1x1 = nn.Conv1d(N, B, 1, bias=False)
         # [M, B, K] -> [M, B, K]
         repeats = []
-        # TODO: No skip connections, and no RELU before mask_1x1_conv in this implementation (there should be)
         for r in range(R):
             blocks = []
             for x in range(X):
@@ -309,7 +306,6 @@ def chose_norm(norm_type, channel_size):
         return nn.BatchNorm1d(channel_size)
 
 
-# TODO: Use nn.LayerNorm to impl cLN to speed up
 class ChannelwiseLayerNorm(nn.Module):
     """Channel-wise Layer Normalization (cLN)"""
     def __init__(self, channel_size):
