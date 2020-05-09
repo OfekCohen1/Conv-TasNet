@@ -21,6 +21,10 @@ def separate(model_path, mix_dir, mix_json, out_dir, use_cuda, sample_rate, batc
 
     # Load model
     model = ConvTasNet.load_model(model_path)
+    # num_params = 0
+    # for paramter in model.separator.parameters():
+    #     num_params += torch.numel(paramter)
+    # print(num_params)
     model.eval()
     if use_cuda:
         model.cuda()
@@ -33,7 +37,7 @@ def separate(model_path, mix_dir, mix_json, out_dir, use_cuda, sample_rate, batc
     os.makedirs(out_dir, exist_ok=True)
 
     def write(inputs, filename, sr=sample_rate):
-        librosa.output.write_wav(filename, inputs, sr)# norm=True)
+        librosa.output.write_wav(filename, inputs, sr, norm=True)
 
     with torch.no_grad():
         for (i, data) in enumerate(eval_loader):
@@ -52,12 +56,13 @@ def separate(model_path, mix_dir, mix_json, out_dir, use_cuda, sample_rate, batc
                                         os.path.basename(filename).strip('.wav'))
                 write(mixture[i], filename + '.wav')
                 C = flat_estimate[i].shape[0]
+                clean = flat_estimate[i][0]
                 for c in range(C):
-                    write(flat_estimate[i][c], filename + '_s{}.wav'.format(c+1))
+                    write(clean, filename + '_clean.wav')
 
 
 if __name__ == '__main__':
-    model_path = "../egs/models/test.pth"  # TODO: Add this
+    model_path = "../egs/models/speech_enhancement_si_sdr.pth"  # TODO: Add this
     mix_dir = "../egs/separate"  # TODO: Add this, indlues dir for wav files
     mix_json = ""
     out_dir = "../egs/separate/Separated_results"
