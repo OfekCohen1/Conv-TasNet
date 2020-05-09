@@ -12,8 +12,8 @@ EPS = 1e-8
 
 
 class DPRNN(nn.Module):
-    def __init__(self, input_dim, bottleneck_size, hidden_dim,
-                 layer=4, chunk_size=100, rnn_type='LSTM', L=16, norm_type="gLN", causal=False):
+    def __init__(self, input_size, bottleneck_size, hidden_size, C,
+                 num_layers=6, chunk_size=180, rnn_type='LSTM', L=16, norm_type="cLN", causal=True):
         """
         Args:
             N: Number of filters in autoencoder
@@ -31,29 +31,31 @@ class DPRNN(nn.Module):
         # TODO: Fix args here
         super(DPRNN, self).__init__()
         # Hyper-parameter
-        self.input_dim = input_dim
+        self.input_size = input_size
         self.bottleneck_size = bottleneck_size
-        self.hidden_dim = hidden_dim
-        self.layer = layer
+        self.hidden_dim = hidden_size
+        self.num_layers = num_layers
         self.norm_type = norm_type
         self.causal = causal
         self.L = L
         self.chunk_size = chunk_size
         self.output_size = bottleneck_size
+        self.C = C
+
         bidirectional = False if causal else True
         # Components
-        self.encoder = Encoder(L, input_dim)
+        self.encoder = Encoder(L, input_size)
 
-        self.bottleneck_conv1v1 = nn.Conv1d(input_dim, bottleneck_size, 1, bias=False)
+        self.bottleneck_conv1v1 = nn.Conv1d(input_size, bottleneck_size, 1, bias=False)
         self.separator = DPRNN_separator(rnn_type, bottleneck_size, hidden_size, self.output_size,
-                               num_layers=num_layers, bidirectional=bidirectional)
+                                         num_layers=num_layers, bidirectional=bidirectional)
         num_params = 0
         for paramter in self.separator.parameters():
             num_params += torch.numel(paramter)
-        print(num_params/1e6)
-        self.mask_conv1v1 = nn.Conv1d(bottleneck_size, N * C, 1, bias=False)
+        print("Model size is:" + str(num_params / 1e6))
+        self.mask_conv1v1 = nn.Conv1d(bottleneck_size, input_size * C, 1, bias=False)
 
-        self.decoder = Decoder(N, L)
+        self.decoder = Decoder(input_size, L)
         # init
         for p in self.parameters():
             if p.dim() > 1:
@@ -69,14 +71,13 @@ class DPRNN(nn.Module):
         mixture_w = self.encoder(mixture)  # M x N x K
         mixture_bottleneck = self.bottleneck_conv1v1(mixture_w)
         print(mixture_bottleneck.shape)
-        mixture_bottleneck, rest = self.split_feature(mixture_bottleneck, self.chunk_size) # M x B x chunk_size x S
+        mixture_bottleneck, rest = self.split_feature(mixture_bottleneck, self.chunk_size)  # M x B x chunk_size x S
         est_mask = self.separator(mixture_bottleneck)  # M x B x chunk_size x S
         est_mask = self.merge_feature(est_mask, rest)
         est_mask = self.mask_conv1v1(est_mask)  #
-        M,_, K = est_mask.shape
-        est_mask = est_mask.view(M, C, N, K)
+        M, _, K = est_mask.shape
+        est_mask = est_mask.view(M, self.C, self.input_size, K)
         num_params = 0
-
 
         est_source = self.decoder(mixture_w, est_mask)  # M x C x T_conv
 
@@ -84,6 +85,10 @@ class DPRNN(nn.Module):
         T_origin = mixture.size(-1)
         T_conv = est_source.size(-1)
         est_source = functional.pad(est_source, (0, T_origin - T_conv))
+
+        import GPUtil
+        GPUtil.showUtilization()
+
         return est_source
 
     @classmethod
@@ -165,6 +170,7 @@ class DPRNN(nn.Module):
             output = output[:, :, :-rest]
 
         return output.contiguous()  # B, N, T
+
 
 class Encoder(nn.Module):
     """Estimation of the nonnegative mixture weight by a 1-D conv layer.
@@ -252,7 +258,8 @@ class DPRNN_separator(nn.Module):
         for i in range(num_layers):
             self.in_segment_rnn.append(SingleRNN(rnn_type, input_size, hidden_size, dropout,
                                                  bidirectional=True))  # intra-segment RNN is always noncausal
-            self.between_segments_rnn.append(SingleRNN(rnn_type, input_size, hidden_size, dropout, bidirectional=bidirectional))
+            self.between_segments_rnn.append(
+                SingleRNN(rnn_type, input_size, hidden_size, dropout, bidirectional=bidirectional))
             self.in_segment_norm.append(chose_norm(norm_type, input_size))
             self.between_segments_norm.append(chose_norm(norm_type, input_size))
 
@@ -270,18 +277,20 @@ class DPRNN_separator(nn.Module):
         input = input.float()
         output = input
         for i in range(len(self.in_segment_rnn)):
-            row_input = output.permute(0, 3, 2, 1).contiguous().view(batch_size * S, chunk_size, -1)  # B*S, chunk_size, N
+            row_input = output.permute(0, 3, 2, 1).contiguous().view(batch_size * S, chunk_size,
+                                                                     -1)  # B*S, chunk_size, N
             # print(row_input.shape)
             row_output = self.in_segment_rnn[i](row_input)  # B*S, chunk_size, H
             row_output = row_output.view(batch_size, S, chunk_size, -1).permute(0, 3, 2,
-                                                                             1).contiguous()  # B, N, chunk_size, S
+                                                                                1).contiguous()  # B, N, chunk_size, S
             row_output = self.in_segment_norm[i](row_output)
             output = output + row_output
 
-            col_input = output.permute(0, 2, 3, 1).contiguous().view(batch_size * chunk_size, S, -1)  # B*chunk_size, S, N
+            col_input = output.permute(0, 2, 3, 1).contiguous().view(batch_size * chunk_size, S,
+                                                                     -1)  # B*chunk_size, S, N
             col_output = self.between_segments_rnn[i](col_input)  # B*chunk_size, S, H
             col_output = col_output.view(batch_size, chunk_size, S, -1).permute(0, 3, 1,
-                                                                             2).contiguous()  # B, N, chunk_size, S
+                                                                                2).contiguous()  # B, N, chunk_size, S
             col_output = self.between_segments_norm[i](col_output)
             output = output + col_output
 
@@ -378,7 +387,7 @@ class InterChunkNorm(nn.Module):
             cLN_y: [M, N, chunk, S]
         """
         # TODO: Think if this is a causal norm when it's Batch x N x chunk x S
-        mean = torch.mean(y, dim=1, keepdim=True).mean(dim=2, keepdim=True) # [M, 1, 1, S]
+        mean = torch.mean(y, dim=1, keepdim=True).mean(dim=2, keepdim=True)  # [M, 1, 1, S]
         var = torch.var(y, dim=1, keepdim=True, unbiased=False)  # [M, 1, 1, S]
         cLN_y = self.gamma * (y - mean) / torch.pow(var + EPS, 0.5) + self.beta
         return cLN_y
@@ -427,7 +436,7 @@ def pad_segment(input, segment_size):
     return input, rest
 
 
-def split_feature( input, segment_size):
+def split_feature(input, segment_size):
     # split the feature into chunks of segment size
     # input is the features: (B, N, T)
 
@@ -441,8 +450,8 @@ def split_feature( input, segment_size):
 
     return segments, rest
 
-def merge_feature(input, rest):
 
+def merge_feature(input, rest):
     # merge the splitted features into full utterance
     # input is the features: (B, N, L, K)
 
@@ -458,27 +467,28 @@ def merge_feature(input, rest):
         output = output[:, :, :-rest]
 
     return output.contiguous()  # B, N, T
+
+
 if __name__ == "__main__":
     torch.manual_seed(123)
-    M, N, L, T = 4, 64, 20, 32000
-    norm_type, causal = "cLN", True
-    mixture = torch.randint(3, (M, T))
-
-    rnn_type = 'LSTM'  # TODO: fix where this is
-    bidirectional = False if causal else True
-    input_size = N
-    bottleneck_size = 96
-    hidden_size = 128
-    num_layers = 6
-    chunk_size = 180
-    C = 2
-    # test Encoder
-    model = DPRNN(input_size, bottleneck_size, hidden_size,
-                  layer=num_layers, chunk_size=chunk_size, rnn_type=rnn_type,
-                  L=10, norm_type=norm_type, causal=True)
-    mixture = mixture.float()
-
-    estimated_stuff = model(mixture)
+    # M, N, L, T = 4, 64, 20, 32000
+    # norm_type, causal = "cLN", True
+    # mixture = torch.randint(3, (M, T))
+    #
+    # rnn_type = 'LSTM'
+    # bidirectional = False if causal else True
+    # input_size = N
+    # bottleneck_size = 96
+    # hidden_size = 128
+    # num_layers = 6
+    # chunk_size = 180
+    # # test Encoder
+    # model = DPRNN(input_size, bottleneck_size, hidden_size,
+    #               layer=num_layers, chunk_size=chunk_size, rnn_type=rnn_type,
+    #               L=10, norm_type=norm_type, causal=True)
+    # mixture = mixture.float()
+    #
+    # estimated_stuff = model(mixture)
     #
     # encoder = Encoder(L, N)
     #
@@ -504,6 +514,3 @@ if __name__ == "__main__":
     # est_mask = mask_conv1v1(est_mask)
     # M, _, L = est_mask.shape
     # est_mask = est_mask.view(M, C, N, L)
-
-
-

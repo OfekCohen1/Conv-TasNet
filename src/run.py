@@ -40,10 +40,10 @@ if __name__ == '__main__':
     num_workers = 0
     max_hours = 0.05
 
-    dataset = AudioDataset(train_dir, batch_size, segment=4, max_hours=max_hours)
-    dataloader = AudioDataLoader(dataset, batch_size=1, num_workers=num_workers)
-    i = 0
-    for data in dataloader:
-        i += 1
-    print(i)
-    # train(data_dir, epochs, batch_size, model_path=model_path, max_hours=max_hours, continue_from= continue_from)
+    # dataset = AudioDataset(train_dir, batch_size, segment=4, max_hours=max_hours)
+    # dataloader = AudioDataLoader(dataset, batch_size=1, num_workers=num_workers)
+    # i = 0
+    # for data in dataloader:
+    #     i += 1
+    # print(i)
+    train(data_dir, epochs, batch_size, model_path=model_path, max_hours=max_hours, continue_from= continue_from)

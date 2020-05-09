@@ -9,9 +9,10 @@ import torch
 from src.data import AudioDataLoader, AudioDataset
 from src.solver import Solver
 from src.conv_tasnet import ConvTasNet
+from src.DPRNN_model import DPRNN
 
 
-def train(data_dir, epochs,  batch_size, model_path,  max_hours=None, continue_from=""):
+def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_from=""):
     # General config
     # Task related
     json_dir = data_dir
@@ -21,18 +22,18 @@ def train(data_dir, epochs,  batch_size, model_path,  max_hours=None, continue_f
     segment_len = 4
 
     # Network architecture
-    N = 256  # Number of filters in autoencoder
-    L = 20  # Length of filters in conv autoencoder
-    B = 256  # number of channels in conv blocks - after bottleneck 1x1 conv
-    H = 512  # number of channels in inner conv1d block
-    P = 3  # length of filter in inner conv1d blocks
-    X = 8  # number of conv1d blocks in (also number of dilations) in each repeat
-    R = 4  # number of repeats
-    C = 2  # Number of speakers
+    causal = 1
+    rnn_type = 'LSTM'
+    input_size = 64
+    bottleneck_size = 96
+    hidden_size = 128
+    num_layers = 6
+    chunk_size = 180
+    L = 10
+    C = 2
 
-    norm_type = 'gLN'  # choices=['gLN', 'cLN', 'BN']
-    causal = 0
-    mask_nonlinear = 'relu'
+    bidirectional = False if causal else True
+    norm_type = 'cLN' if causal else 'gLN'
 
     use_cuda = 1
 
@@ -58,7 +59,6 @@ def train(data_dir, epochs,  batch_size, model_path,  max_hours=None, continue_f
     visdom_epoch = 0
     visdom_id = "Conv-TasNet Training"  # TODO: Check what this does
 
-
     arg_solver = (use_cuda, epochs, half_lr, early_stop, max_grad_norm, save_folder, enable_checkpoint, continue_from,
                   model_path, print_freq, visdom_enabled, visdom_epoch, visdom_id)
 
@@ -74,11 +74,9 @@ def train(data_dir, epochs,  batch_size, model_path,  max_hours=None, continue_f
     cv_loader = AudioDataLoader(cv_dataset, batch_size=1,
                                 num_workers=0)
     data = {'tr_loader': tr_loader, 'cv_loader': cv_loader}
-    # model
-    model = ConvTasNet(N, L, B, H, P, X, R,
-                       C, norm_type=norm_type, causal=causal,
-                       mask_nonlinear=mask_nonlinear)
-    # print(model)
+
+    model = DPRNN(input_size, bottleneck_size, hidden_size, C, num_layers=num_layers,
+                  chunk_size=chunk_size, rnn_type=rnn_type, L=L, norm_type=norm_type, causal=causal)
     if use_cuda:
         model = torch.nn.DataParallel(model)
         model.cuda()
