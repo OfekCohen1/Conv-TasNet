@@ -33,7 +33,7 @@ class DPRNN(nn.Module):
         # Hyper-parameter
         self.input_size = input_size
         self.bottleneck_size = bottleneck_size
-        self.hidden_dim = hidden_size
+        self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.norm_type = norm_type
         self.causal = causal
@@ -41,6 +41,7 @@ class DPRNN(nn.Module):
         self.chunk_size = chunk_size
         self.output_size = bottleneck_size
         self.C = C
+        self.rnn_type = rnn_type
 
         bidirectional = False if causal else True
         # Components
@@ -70,14 +71,12 @@ class DPRNN(nn.Module):
         """
         mixture_w = self.encoder(mixture)  # M x N x K
         mixture_bottleneck = self.bottleneck_conv1v1(mixture_w)
-        print(mixture_bottleneck.shape)
         mixture_bottleneck, rest = self.split_feature(mixture_bottleneck, self.chunk_size)  # M x B x chunk_size x S
         est_mask = self.separator(mixture_bottleneck)  # M x B x chunk_size x S
         est_mask = self.merge_feature(est_mask, rest)
         est_mask = self.mask_conv1v1(est_mask)  #
         M, _, K = est_mask.shape
         est_mask = est_mask.view(M, self.C, self.input_size, K)
-        num_params = 0
 
         est_source = self.decoder(mixture_w, est_mask)  # M x C x T_conv
 
@@ -86,8 +85,8 @@ class DPRNN(nn.Module):
         T_conv = est_source.size(-1)
         est_source = functional.pad(est_source, (0, T_origin - T_conv))
 
-        import GPUtil
-        GPUtil.showUtilization()
+        # import GPUtil
+        # GPUtil.showUtilization()
 
         return est_source
 
@@ -100,10 +99,9 @@ class DPRNN(nn.Module):
 
     @classmethod
     def load_model_from_package(cls, package):
-        model = cls(package['N'], package['L'], package['B'], package['H'],
-                    package['P'], package['X'], package['R'], package['C'],
-                    norm_type=package['norm_type'], causal=package['causal'],
-                    mask_nonlinear=package['mask_nonlinear'])
+        model = cls(package['input_size'], package['bottleneck_size'], package['hidden_size'], package['C'],
+                    num_layers=package['num_layers'], chunk_size=package['chunk_size'], rnn_type=package['rnn_type'], L=package['L'],
+                    norm_type=package['norm_type'], causal=package['causal'])
         model.load_state_dict(package['state_dict'])
         return model
 
@@ -111,10 +109,9 @@ class DPRNN(nn.Module):
     def serialize(model, optimizer, epoch, tr_loss=None, cv_loss=None):
         package = {
             # hyper-parameter
-            'N': model.N, 'L': model.L, 'B': model.B, 'H': model.H,
-            'P': model.P, 'X': model.X, 'R': model.R, 'C': model.C,
-            'norm_type': model.norm_type, 'causal': model.causal,
-            'mask_nonlinear': model.mask_nonlinear,
+            'input_size': model.input_size, 'bottleneck_size': model.bottleneck_size, 'hidden_size': model.hidden_size,'C': model.C,
+            'num_layers': model.num_layers, 'chunk_size': model.chunk_size, 'rnn_type': model.rnn_type, 'L': model.L, 'norm_type': model.norm_type,
+            'causal': model.causal,
             # state
             'state_dict': model.state_dict(),
             'optim_dict': optimizer.state_dict(),

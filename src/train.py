@@ -10,6 +10,8 @@ from src.data import AudioDataLoader, AudioDataset
 from src.solver import Solver
 from src.conv_tasnet import ConvTasNet
 from src.DPRNN_model import DPRNN
+from torch.utils.data.dataset import random_split
+import math
 
 
 def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_from=""):
@@ -17,7 +19,6 @@ def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_fro
     # Task related
     json_dir = data_dir
     train_dir = data_dir + "tr"
-    valid_dir = data_dir + "cv"
     sample_rate = 8000
     segment_len = 4
 
@@ -29,10 +30,9 @@ def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_fro
     hidden_size = 128
     num_layers = 6
     chunk_size = 180
-    L = 10
+    L = 6
     C = 2
 
-    bidirectional = False if causal else True
     norm_type = 'cLN' if causal else 'gLN'
 
     use_cuda = 1
@@ -42,32 +42,30 @@ def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_fro
     max_grad_norm = 5  # gradient clipping
 
     shuffle = 1  # Shuffle every epoch
-    num_workers = 0
+    num_workers = 8
     # optimizer
     optimizer_type = "adam"
-    lr = 1e-3
+    lr = 5e-4
     momentum = 0
     l2 = 0  # Weight decay - l2 norm
 
     # save and visualize
     save_folder = "../egs/models"
     enable_checkpoint = 0  # enables saving checkpoints
-    # continue_from = ""  # model to continue from  # TODO check this
-    # model_path = ""  # TODO: Fix this
-    print_freq = 5
-    visdom_enabled = 0
-    visdom_epoch = 0
+    print_freq = 500
+    visdom_enabled = 1
+    visdom_epoch = 1
     visdom_id = "Conv-TasNet Training"  # TODO: Check what this does
 
     arg_solver = (use_cuda, epochs, half_lr, early_stop, max_grad_norm, save_folder, enable_checkpoint, continue_from,
                   model_path, print_freq, visdom_enabled, visdom_epoch, visdom_id)
 
     # Datasets and Dataloaders
-    tr_dataset = AudioDataset(train_dir, batch_size,
+    tr_cv_dataset = AudioDataset(train_dir, batch_size,
                               sample_rate=sample_rate, segment=segment_len, max_hours=max_hours)
-    cv_dataset = AudioDataset(valid_dir, batch_size,
-                              sample_rate=sample_rate,
-                              segment=segment_len)  # -1 -> use full audio
+    cv_len = int(0.1 * math.ceil(len(tr_cv_dataset)))
+    tr_dataset, cv_dataset = random_split(tr_cv_dataset, [len(tr_cv_dataset) - cv_len, cv_len])
+
     tr_loader = AudioDataLoader(tr_dataset, batch_size=1,
                                 shuffle=shuffle,
                                 num_workers=num_workers)

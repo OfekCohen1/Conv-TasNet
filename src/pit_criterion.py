@@ -23,7 +23,7 @@ def cal_loss(source, estimate_source, source_lengths):
     # reorder_estimate_source = reorder_source(estimate_source, perms, max_snr_idx)
     # return loss, max_snr, estimate_source, reorder_estimate_source
     si_sdr = calc_si_sdr(source, estimate_source, source_lengths)
-    return 0.0 - si_sdr
+    return 0.0 - torch.mean(si_sdr)
 
 def calc_si_sdr(source, estimate_source, source_lengths):
     """ SI-SDR for Speech Enhancement from paper https://arxiv.org/abs/1909.01019 """

@@ -60,7 +60,8 @@ class Solver(object):
             package = torch.load(self.continue_from)
             self.model.module.load_state_dict(package['state_dict'])
             self.optimizer.load_state_dict(package['optim_dict'])
-            self.epochs = self.epochs + self.start_epoch + 1
+            self.start_epoch = package['epoch']
+            self.epochs = self.epochs + self.start_epoch
             self.tr_loss = torch.Tensor(self.epochs)
             self.cv_loss = torch.Tensor(self.epochs)
             self.vis_epochs = torch.arange(1, self.epochs + 1)
@@ -93,12 +94,12 @@ class Solver(object):
             # TODO: Change to save less than each epoch
             if self.enable_checkpoint:
                 file_path = os.path.join(self.save_folder,
-                                          "checkpoint_models",'epoch%d.pth.tar' % (epoch + 1))
+                                         "checkpoint_models", 'epoch%d.pth.tar' % (epoch + 1))
                 torch.save(self.model.module.serialize(self.model.module,
                                                        self.optimizer, epoch + 1,
                                                        tr_loss=self.tr_loss,
                                                        cv_loss=self.cv_loss),
-                                                        file_path)
+                           file_path)
                 print('Saving checkpoint model to %s' % file_path)
 
             # Cross validation
@@ -198,12 +199,12 @@ class Solver(object):
             # import GPUtil
             total_loss += loss.item()
 
-            if i % self.print_freq == 0:
-                print('Epoch {0} | Iter {1} | Average Loss {2:.3f} | '
-                      'Current Loss {3:.6f} | {4:.1f} ms/batch'.format(
-                    epoch + 1, i + 1, total_loss / (i + 1),
-                    loss.item(), 1000 * (time.time() - start) / (i + 1)),
-                    flush=True)
+            #if i % self.print_freq == 0:
+            #    print('Epoch {0} | Iter {1} | Average Loss {2:.3f} | '
+            #          'Current Loss {3:.6f} | {4:.1f} ms/batch'.format(
+            #        epoch + 1, i + 1, total_loss / (i + 1),
+            #        loss.item(), 1000 * (time.time() - start) / (i + 1)),
+            #        flush=True)
 
             # visualizing loss using visdom
             if self.visdom_epoch and not cross_valid:

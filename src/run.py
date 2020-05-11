@@ -25,25 +25,23 @@ sample_rate = 8000
 
 
 id = 0  # TODO: What is this
-epochs = 50  # TODO: Change this before run
+epochs = 80  # TODO: Change this before run
 
 # save and visualize
-continue_from = ""
-model_path = "test.pth"
-
-ngpu = 1  # TODO: What is this
+# continue_from = "../egs/models/DPRNN_test_.pth"
+continue_from = "../egs/models/DPRNN_SE_LSTM_N_64_B_96_hidden_128_chunk_180_L_6.pth"
+model_path = "DPRNN_SE_LSTM_N_64_B_96_hidden_128_chunk_180_L_6.pth"
 
 if __name__ == '__main__':
     # preprocess(data_dir, json_dir, sample_rate)
     #
-    batch_size = 1
-    num_workers = 0
-    max_hours = 0.05
-
-    # dataset = AudioDataset(train_dir, batch_size, segment=4, max_hours=max_hours)
-    # dataloader = AudioDataLoader(dataset, batch_size=1, num_workers=num_workers)
-    # i = 0
-    # for data in dataloader:
-    #     i += 1
-    # print(i)
+    batch_size = 4
+    max_hours = None
+    #num_workers = 1
+    #dataset = AudioDataset(train_dir, batch_size, segment=4, max_hours=max_hours)
+    #dataloader = AudioDataLoader(dataset, batch_size=1, num_workers=num_workers)
+    #i = 0
+    #for data in dataloader:
+    #    i += 1
+    #print(i)
     train(data_dir, epochs, batch_size, model_path=model_path, max_hours=max_hours, continue_from= continue_from)
