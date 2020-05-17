@@ -37,7 +37,7 @@ def preprocess(data_dir, json_dir, sample_rate):
 
 if __name__ == "__main__":
 
-    data_dir = "../egs/SE_dataset"  # TODO: Check if I should use min or max
+    data_dir = "../egs/SE_dataset"
     json_dir = "../egs/SE_dataset"
     sample_rate = 8000
     preprocess(data_dir, json_dir, sample_rate)

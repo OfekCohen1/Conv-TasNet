@@ -2,8 +2,10 @@
 # Author: Kaituo XU
 
 import math
-
+import librosa
+import numpy as np
 import torch
+import torchaudio
 
 
 def overlap_and_add(signal, frame_step):
@@ -64,6 +66,53 @@ def remove_pad(inputs, inputs_lengths):
         elif dim == 2:  # [B, T]
             results.append(input[:length].view(-1).cpu().numpy())
     return results
+
+
+def parse_audio(audio, sample_rate, window_size, window_stride, window, device, normalize=True):
+    n_fft = int(sample_rate * window_size)
+    win_length = n_fft
+    hop_length = int(sample_rate * window_stride)
+    # STFT
+    spect = torchaudio.functional.spectrogram(audio, 0, torch.hamming_window(win_length).to(device),
+                                            n_fft, hop_length, win_length, power=1, normalized=False)
+    # S = log(S+1)
+    spect = torch.log1p(spect)
+    # spect = torch.FloatTensor(spect)
+    if normalize:
+        mean = spect.clone().mean()
+        std = spect.clone().std()
+        spect.add_(-mean)
+        spect.div_(std)
+
+    return spect
+
+
+def arrange_batch(batch, device):
+    """
+    Batch is list of audios as spectograms, ie [spect1... spectB]
+    inputs is B x 1 x freq x time
+    input_percentages is size B with percentages out of max_length
+    """
+
+    def func(p):
+        return p.size(1)
+
+    batch = sorted(batch, key=lambda sample: sample.size(1), reverse=True)
+    longest_sample = max(batch, key=func)
+    freq_size = longest_sample.size(0)
+    minibatch_size = len(batch)
+    max_seqlength = longest_sample.size(1)
+    inputs = torch.zeros(minibatch_size, 1, freq_size, max_seqlength)
+    input_percentages = torch.zeros(minibatch_size)
+    for x in range(minibatch_size):
+        tensor = batch[x]
+        seq_length = tensor.size(1)
+        inputs[x][0].narrow(1, 0, seq_length).copy_(tensor)
+        input_percentages[x] = seq_length / float(max_seqlength)
+
+    input_sizes = input_percentages.mul_(int(inputs.size(3))).int()
+    inputs, input_sizes = inputs.to(device), input_sizes.to(device)
+    return inputs, input_sizes
 
 
 if __name__ == '__main__':

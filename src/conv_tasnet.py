@@ -236,7 +236,6 @@ class TemporalBlock(nn.Module):
         """
         residual = x
         out = self.net(x)
-        # TODO: when P = 3 here works fine, but when P = 2 maybe need to pad?
         return out + residual  # look like w/o F.relu is better than w/ F.relu
         # return F.relu(out + residual)
 
@@ -311,7 +310,7 @@ class ChannelwiseLayerNorm(nn.Module):
     def __init__(self, channel_size):
         super(ChannelwiseLayerNorm, self).__init__()
         self.gamma = nn.Parameter(torch.Tensor(1, channel_size, 1))  # [1, N, 1]
-        self.beta = nn.Parameter(torch.Tensor(1, channel_size,1 ))  # [1, N, 1]
+        self.beta = nn.Parameter(torch.Tensor(1, channel_size, 1))  # [1, N, 1]
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -350,7 +349,6 @@ class GlobalLayerNorm(nn.Module):
         Returns:
             gLN_y: [M, N, K]
         """
-        # TODO: in torch 1.0, torch.mean() support dim list
         mean = y.mean(dim=1, keepdim=True).mean(dim=2, keepdim=True) #[M, 1, 1]
         var = (torch.pow(y-mean, 2)).mean(dim=1, keepdim=True).mean(dim=2, keepdim=True)
         gLN_y = self.gamma * (y - mean) / torch.pow(var + EPS, 0.5) + self.beta

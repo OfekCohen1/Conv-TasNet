@@ -15,13 +15,13 @@ class Solver(object):
     def __init__(self, data, model, optimizer, arg_solver):
 
         (use_cuda, epochs, half_lr, early_stop, max_grad_norm, save_folder, enable_checkpoint, continue_from,
-         model_path, print_freq, visdom_enabled, visdom_epoch, visdom_id) = arg_solver
+         model_path, print_freq, visdom_enabled, visdom_epoch, visdom_id, device) = arg_solver
 
         self.tr_loader = data['tr_loader']
         self.cv_loader = data['cv_loader']
         self.model = model
         self.optimizer = optimizer
-
+        self.device = device
         # Training config
         self.use_cuda = use_cuda
         self.epochs = epochs
@@ -36,7 +36,6 @@ class Solver(object):
         # logging
         self.print_freq = print_freq
         # visualizing loss using visdom
-        # TODO: Change size of tr_loss and cv_loss since my epochs are bigger
         self.tr_loss = torch.Tensor(self.epochs)
         self.cv_loss = torch.Tensor(self.epochs)
         self.visdom_enabled = visdom_enabled
@@ -57,7 +56,8 @@ class Solver(object):
         # Reset
         if self.continue_from:
             print('Loading checkpoint model %s' % self.continue_from)
-            package = torch.load(self.continue_from)
+            file_path = os.path.join(self.save_folder, self.continue_from)
+            package = torch.load(file_path)
             self.model.module.load_state_dict(package['state_dict'])
             self.optimizer.load_state_dict(package['optim_dict'])
             self.start_epoch = package['epoch']
@@ -83,7 +83,7 @@ class Solver(object):
             print("Training...")
             self.model.train()  # Turn on BatchNorm & Dropout
             start = time.time()
-            tr_avg_loss = self._run_one_epoch(epoch)
+            tr_avg_loss = self._run_one_epoch(epoch, self.device)
             print('-' * 85)
             print('Train Summary | End of Epoch {0} | Time {1:.2f}s | '
                   'Train Loss {2:.3f}'.format(
@@ -91,7 +91,6 @@ class Solver(object):
             print('-' * 85)
 
             # Save model each epoch
-            # TODO: Change to save less than each epoch
             if self.enable_checkpoint:
                 file_path = os.path.join(self.save_folder,
                                          "checkpoint_models", 'epoch%d.pth.tar' % (epoch + 1))
@@ -106,7 +105,7 @@ class Solver(object):
             print('Cross validation...')
             self.model.eval()  # Turn off Batchnorm & Dropout
             with torch.no_grad():
-                val_loss = self._run_one_epoch(epoch, cross_valid=True)
+                val_loss = self._run_one_epoch(epoch, self.device, cross_valid=True)
             print('-' * 85)
             print('Valid Summary | End of Epoch {0} | Time {1:.2f}s | '
                   'Valid Loss {2:.3f}'.format(
@@ -166,7 +165,7 @@ class Solver(object):
                         update='replace',
                     )
 
-    def _run_one_epoch(self, epoch, cross_valid=False):
+    def _run_one_epoch(self, epoch, device, cross_valid=False):
         start = time.time()
         total_loss = 0
 
@@ -187,9 +186,9 @@ class Solver(object):
                 mixture_lengths = mixture_lengths.cuda()
                 padded_clean_noise = padded_clean_noise.cuda()
             estimate_clean_and_noise = self.model(padded_mixture)
-            source = padded_clean_noise[:, 0, :]
+            source = padded_clean_noise[:, 0, :]  # first arg is source, second is noise
             estimate_source = estimate_clean_and_noise[:, 0, :]
-            loss = cal_loss(source, estimate_source, mixture_lengths)
+            loss = cal_loss(source, estimate_source, mixture_lengths, device)
             if not cross_valid:
                 self.optimizer.zero_grad()
                 loss.backward()

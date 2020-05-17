@@ -28,7 +28,6 @@ class DPRNN(nn.Module):
             causal: causal or non-causal
             mask_nonlinear: use which non-linear function to generate mask
         """
-        # TODO: Fix args here
         super(DPRNN, self).__init__()
         # Hyper-parameter
         self.input_size = input_size
@@ -383,7 +382,6 @@ class InterChunkNorm(nn.Module):
         Returns:
             cLN_y: [M, N, chunk, S]
         """
-        # TODO: Think if this is a causal norm when it's Batch x N x chunk x S
         mean = torch.mean(y, dim=1, keepdim=True).mean(dim=2, keepdim=True)  # [M, 1, 1, S]
         var = torch.var(y, dim=1, keepdim=True, unbiased=False)  # [M, 1, 1, S]
         cLN_y = self.gamma * (y - mean) / torch.pow(var + EPS, 0.5) + self.beta
@@ -410,7 +408,6 @@ class GlobalLayerNorm(nn.Module):
         Returns:
             cLN_y: [M, N, chunk, S]
         """
-        # TODO: in torch 1.0, torch.mean() support dim list
         mean = y.mean(dim=1, keepdim=True).mean(dim=2, keepdim=True).mean(dim=3, keepdim=True)  # [M, 1, 1, 1]
         var = (torch.pow(y - mean, 2)).mean(dim=1, keepdim=True).mean(dim=2, keepdim=True).mean(dim=3, keepdim=True)
         gLN_y = self.gamma * (y - mean) / torch.pow(var + EPS, 0.5) + self.beta

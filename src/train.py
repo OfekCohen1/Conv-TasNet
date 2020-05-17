@@ -19,7 +19,7 @@ def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_fro
     # Task related
     json_dir = data_dir
     train_dir = data_dir + "tr"
-    sample_rate = 8000
+    sample_rate = 16000
     segment_len = 4
 
     # Network architecture
@@ -36,13 +36,13 @@ def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_fro
     norm_type = 'cLN' if causal else 'gLN'
 
     use_cuda = 1
-
+    device = torch.device("cuda" if use_cuda else "cpu")
     half_lr = 1  # Half the learning rate when there's a small improvement
     early_stop = 1  # Stop learning if no imporvement after 10 epochs
     max_grad_norm = 5  # gradient clipping
 
     shuffle = 1  # Shuffle every epoch
-    num_workers = 8
+    num_workers = 4
     # optimizer
     optimizer_type = "adam"
     lr = 5e-4
@@ -53,12 +53,12 @@ def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_fro
     save_folder = "../egs/models"
     enable_checkpoint = 0  # enables saving checkpoints
     print_freq = 500
-    visdom_enabled = 1
-    visdom_epoch = 1
+    visdom_enabled = 0
+    visdom_epoch = 0
     visdom_id = "Conv-TasNet Training"  # TODO: Check what this does
 
     arg_solver = (use_cuda, epochs, half_lr, early_stop, max_grad_norm, save_folder, enable_checkpoint, continue_from,
-                  model_path, print_freq, visdom_enabled, visdom_epoch, visdom_id)
+                  model_path, print_freq, visdom_enabled, visdom_epoch, visdom_id, device)
 
     # Datasets and Dataloaders
     tr_cv_dataset = AudioDataset(train_dir, batch_size,
@@ -70,7 +70,7 @@ def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_fro
                                 shuffle=shuffle,
                                 num_workers=num_workers)
     cv_loader = AudioDataLoader(cv_dataset, batch_size=1,
-                                num_workers=0)
+                                num_workers=num_workers)
     data = {'tr_loader': tr_loader, 'cv_loader': cv_loader}
 
     model = DPRNN(input_size, bottleneck_size, hidden_size, C, num_layers=num_layers,
@@ -93,7 +93,7 @@ def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_fro
         return
 
     # solver
-    solver = Solver(data, model, optimizer, arg_solver)  # TODO: Fix solver thing
+    solver = Solver(data, model, optimizer, arg_solver)
     solver.train()
 
 

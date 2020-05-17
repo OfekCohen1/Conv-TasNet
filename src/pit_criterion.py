@@ -5,15 +5,19 @@ from itertools import permutations
 
 import torch
 import torch.nn.functional as F
+from src.deepspeech_model import DeepSpeech
+import scipy.signal
+import torchaudio
+from src.utils import arrange_batch, parse_audio
 
 EPS = 1e-8
 
 
-def cal_loss(source, estimate_source, source_lengths):
+def cal_loss(source, estimate_source, source_lengths, device):
     """
     Args:
-        source: [B, C, T], B is batch size
-        estimate_source: [B, C, T]
+        source: [B, T], B is batch size
+        estimate_source: [B, T]
         source_lengths: [B]
     """
     # max_snr, perms, max_snr_idx = cal_si_snr_with_pit(source,
@@ -22,8 +26,10 @@ def cal_loss(source, estimate_source, source_lengths):
     # loss = 0 - torch.mean(max_snr)
     # reorder_estimate_source = reorder_source(estimate_source, perms, max_snr_idx)
     # return loss, max_snr, estimate_source, reorder_estimate_source
-    si_sdr = calc_si_sdr(source, estimate_source, source_lengths)
-    return 0.0 - torch.mean(si_sdr)
+    loss = calc_deep_feature_loss(source, estimate_source, source_lengths, device)
+    # loss2 = calc_si_sdr(source, estimate_source, source_lengths)
+    return loss
+
 
 def calc_si_sdr(source, estimate_source, source_lengths):
     """ SI-SDR for Speech Enhancement from paper https://arxiv.org/abs/1909.01019 """
@@ -38,15 +44,59 @@ def calc_si_sdr(source, estimate_source, source_lengths):
     zero_mean_target = source - mean_target
     zero_mean_estimate = estimate_source - mean_estimate
     #
-    cross_energy = torch.sum(zero_mean_target*zero_mean_estimate, dim=1, keepdim=True)
+    cross_energy = torch.sum(zero_mean_target * zero_mean_estimate, dim=1, keepdim=True)
     target_energy = torch.sum(zero_mean_target ** 2, dim=1, keepdim=True) + EPS
     estimate_energy = torch.sum(zero_mean_estimate ** 2, dim=1, keepdim=True) + EPS
     # si_sdr = 10 * torch.log10(cross_energy/ (target_energy * estimate_energy - cross_energy) + EPS)
     alpha = cross_energy / target_energy
-    si_sdr = torch.sum((alpha * zero_mean_target) ** 2, dim= 1, keepdim=True) /  \
-             torch.sum((alpha * zero_mean_target - zero_mean_estimate) ** 2, dim= 1, keepdim=True)
+    si_sdr = torch.sum((alpha * zero_mean_target) ** 2, dim=1, keepdim=True) / \
+             torch.sum((alpha * zero_mean_target - zero_mean_estimate) ** 2, dim=1, keepdim=True)
     si_sdr = 10 * torch.log10(si_sdr)
     return si_sdr
+
+
+def calc_deep_feature_loss(source, estimate_source, source_lengths, device):
+    """
+    Calculates deep feature loss using the DeepSpeech2 ASR model.
+    Code and model from: https://github.com/SeanNaren/deepspeech.pytorch
+    Args:
+        source: [B, T], B is batch size
+        estimate_source: [B, T]
+        source_lengths: [B], each item is between [0, T]
+    """
+    # TODO: Make sure that output sigal behaves like signal from librosa.load
+    #   ie check Decoder output for clean signal
+    B, T = source.size()
+    model_dir = "../egs/models/loss_models/librispeech_pretrained_v2.pth"
+    deep_features_model = DeepSpeech.load_model(model_dir)
+    deep_features_model = deep_features_model.to(device)
+    # deep_features_model.eval()
+
+    audio_conf = deep_features_model.audio_conf
+    window_stride = audio_conf['window_stride']
+    window_size = audio_conf['window_size']
+    sample_rate = audio_conf['sample_rate']
+    win_length =  int(sample_rate * window_size)
+    windows = {'hamming':  torch.hamming_window(win_length).to(device), 'hann': torch.hann_window(win_length).to(device),
+               'blackman': torch.blackman_window(win_length).to(device),
+               'bartlett': torch.bartlett_window(win_length).to(device)}
+    window = windows.get(audio_conf['window'], windows['hamming'])
+
+    spect_source_list, spect_estimate_list = [], []
+    for b in range(B):
+        spect_source_list.append(parse_audio(source[b, :], sample_rate, window_size,
+                                                         window_stride, window, device, normalize=True))
+        spect_estimate_list.append(parse_audio(estimate_source[b, :], sample_rate, window_size,
+                                                           window_stride, window, device, normalize=True))
+
+    batch_estimate, batch_estimate_sizes = arrange_batch(spect_estimate_list, device)
+    batch_source, batch_source_sizes = arrange_batch(spect_source_list, device )
+
+    features_source, _ = deep_features_model(batch_source, batch_source_sizes)
+    features_estimate, _ = deep_features_model(batch_estimate, batch_estimate_sizes)
+
+    mse_loss = torch.nn.MSELoss()
+    return mse_loss(features_estimate, features_source)
 
 
 def cal_si_snr_with_pit(source, estimate_source, source_lengths):
@@ -124,19 +174,19 @@ def reorder_source(source, perms, max_snr_idx):
     return reorder_source
 
 
-# def get_mask(source, source_lengths):
-#     """
-#     Args:
-#         source: [B, C, T]
-#         source_lengths: [B]
-#     Returns:
-#         mask: [B, 1, T]
-#     """
-#     B, T = source.size()
-#     mask = source.new_ones((B, 1, T))
-#     for i in range(B):
-#         mask[i, :, source_lengths[i]:] = 0
-#     return mask
+def get_mask(source, source_lengths):
+    """
+    Args:
+        source: [B, C, T]
+        source_lengths: [B]
+    Returns:
+        mask: [B, 1, T]
+    """
+    B, T = source.size()
+    mask = source.new_ones((B, 1, T))
+    for i in range(B):
+        mask[i, :, source_lengths[i]:] = 0
+    return mask
 
 
 if __name__ == "__main__":
@@ -147,11 +197,11 @@ if __name__ == "__main__":
     estimate_source = torch.randint(4, (B, C, T))
     source[1, :, -3:] = 0
     estimate_source[1, :, -3:] = 0
-    source_lengths = torch.LongTensor([T, T-3])
+    source_lengths = torch.LongTensor([T, T - 3])
     print('source', source)
     print('estimate_source', estimate_source)
     print('source_lengths', source_lengths)
-    
+
     loss, max_snr, estimate_source, reorder_estimate_source = cal_loss(source, estimate_source, source_lengths)
     print('loss', loss)
     print('max_snr', max_snr)

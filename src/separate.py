@@ -12,6 +12,7 @@ import torch
 from src.data import EvalDataLoader, EvalDataset
 from src.conv_tasnet import ConvTasNet
 from src.utils import remove_pad
+from src.DPRNN_model import DPRNN
 
 
 def separate(model_path, mix_dir, mix_json, out_dir, use_cuda, sample_rate, batch_size):
@@ -20,7 +21,7 @@ def separate(model_path, mix_dir, mix_json, out_dir, use_cuda, sample_rate, batc
               "mix_json is ignored.")
 
     # Load model
-    model = ConvTasNet.load_model(model_path)
+    model = DPRNN.load_model(model_path)
     # num_params = 0
     # for paramter in model.separator.parameters():
     #     num_params += torch.numel(paramter)
@@ -62,8 +63,8 @@ def separate(model_path, mix_dir, mix_json, out_dir, use_cuda, sample_rate, batc
 
 
 if __name__ == '__main__':
-    model_path = "../egs/models/speech_enhancement_si_sdr.pth"  # TODO: Add this
-    mix_dir = "../egs/separate"  # TODO: Add this, indlues dir for wav files
+    model_path = "../egs/models/DPRNN_SE_LSTM_N_64_B_96_hidden_128_chunk_180_L_6.pth"
+    mix_dir = "../egs/separate"
     mix_json = ""
     out_dir = "../egs/separate/Separated_results"
     use_cuda = 1

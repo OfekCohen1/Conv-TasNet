@@ -3,6 +3,7 @@ import numpy as np
 # from src.conv_tasnet import
 from src.preprocess import preprocess
 from src.train import train
+import torch
 from src.data import AudioDataset, AudioDataLoader
 
 # Trying to imitate the run.sh script from the original github
@@ -19,29 +20,30 @@ json_dir = "../egs/SE_dataset/"
 train_dir = data_dir + "tr"
 valid_dir = data_dir + "cv"
 test_dir = data_dir + "tt"
-sample_rate = 8000
-
-#  TODO: Move some of these parameters to the train.py function
 
 
-id = 0  # TODO: What is this
-epochs = 80  # TODO: Change this before run
+
+id = 0
+epochs = 50
 
 # save and visualize
-# continue_from = "../egs/models/DPRNN_test_.pth"
-continue_from = "../egs/models/DPRNN_SE_LSTM_N_64_B_96_hidden_128_chunk_180_L_6.pth"
-model_path = "DPRNN_SE_LSTM_N_64_B_96_hidden_128_chunk_180_L_6.pth"
+
+continue_from = ""
+model_path = "test.pth"
 
 if __name__ == '__main__':
     # preprocess(data_dir, json_dir, sample_rate)
-    #
-    batch_size = 4
+
+    batch_size = 1
     max_hours = None
-    #num_workers = 1
-    #dataset = AudioDataset(train_dir, batch_size, segment=4, max_hours=max_hours)
-    #dataloader = AudioDataLoader(dataset, batch_size=1, num_workers=num_workers)
-    #i = 0
-    #for data in dataloader:
+    # num_workers = 1
+    # dataset = AudioDataset(train_dir, batch_size, segment=4, max_hours=max_hours)
+    # dataloader = AudioDataLoader(dataset, batch_size=1, num_workers=num_workers)
+    # i = 0
+    # for data in dataloader:
     #    i += 1
-    #print(i)
-    train(data_dir, epochs, batch_size, model_path=model_path, max_hours=max_hours, continue_from= continue_from)
+    # print(i)
+    # TODO: Fix sample rate everywhere, and maybe audio_length cause of it
+    # TODO: Check using Decoder that on server we get the correct text (using already trained model).
+    torch.autograd.set_detect_anomaly(True)
+    train(data_dir, epochs, batch_size, model_path=model_path, max_hours=max_hours, continue_from=continue_from)
