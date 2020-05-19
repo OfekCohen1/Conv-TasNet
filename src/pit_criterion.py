@@ -13,7 +13,7 @@ from src.utils import arrange_batch, parse_audio
 EPS = 1e-8
 
 
-def cal_loss(source, estimate_source, source_lengths, device):
+def cal_loss(source, estimate_source, source_lengths, device, features_model=None):
     """
     Args:
         source: [B, T], B is batch size
@@ -26,8 +26,11 @@ def cal_loss(source, estimate_source, source_lengths, device):
     # loss = 0 - torch.mean(max_snr)
     # reorder_estimate_source = reorder_source(estimate_source, perms, max_snr_idx)
     # return loss, max_snr, estimate_source, reorder_estimate_source
-    loss = calc_deep_feature_loss(source, estimate_source, source_lengths, device)
-    # loss2 = calc_si_sdr(source, estimate_source, source_lengths)
+    assert features_model is not None
+    loss = calc_deep_feature_loss(source, estimate_source, source_lengths, features_model, device)
+    # loss2 = 0.0 - torch.mean(calc_si_sdr(source, estimate_source, source_lengths))
+    import GPUtil
+    GPUtil.showinitialization()
     return loss
 
 
@@ -55,7 +58,7 @@ def calc_si_sdr(source, estimate_source, source_lengths):
     return si_sdr
 
 
-def calc_deep_feature_loss(source, estimate_source, source_lengths, device):
+def calc_deep_feature_loss(source, estimate_source, source_lengths, deep_features_model, device):
     """
     Calculates deep feature loss using the DeepSpeech2 ASR model.
     Code and model from: https://github.com/SeanNaren/deepspeech.pytorch
@@ -67,10 +70,9 @@ def calc_deep_feature_loss(source, estimate_source, source_lengths, device):
     # TODO: Make sure that output sigal behaves like signal from librosa.load
     #   ie check Decoder output for clean signal
     B, T = source.size()
-    model_dir = "../egs/models/loss_models/librispeech_pretrained_v2.pth"
-    deep_features_model = DeepSpeech.load_model(model_dir)
+    # model_dir = "../egs/models/loss_models/librispeech_pretrained_v2.pth"
+    # deep_features_model = DeepSpeech.load_model(model_dir)
     deep_features_model = deep_features_model.to(device)
-    # deep_features_model.eval()
 
     audio_conf = deep_features_model.audio_conf
     window_stride = audio_conf['window_stride']

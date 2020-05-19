@@ -15,11 +15,12 @@ class Solver(object):
     def __init__(self, data, model, optimizer, arg_solver):
 
         (use_cuda, epochs, half_lr, early_stop, max_grad_norm, save_folder, enable_checkpoint, continue_from,
-         model_path, print_freq, visdom_enabled, visdom_epoch, visdom_id, device) = arg_solver
+         model_path, print_freq, visdom_enabled, visdom_epoch, visdom_id, deep_features_model, device) = arg_solver
 
         self.tr_loader = data['tr_loader']
         self.cv_loader = data['cv_loader']
         self.model = model
+        self.deep_features_model = deep_features_model
         self.optimizer = optimizer
         self.device = device
         # Training config
@@ -188,7 +189,7 @@ class Solver(object):
             estimate_clean_and_noise = self.model(padded_mixture)
             source = padded_clean_noise[:, 0, :]  # first arg is source, second is noise
             estimate_source = estimate_clean_and_noise[:, 0, :]
-            loss = cal_loss(source, estimate_source, mixture_lengths, device)
+            loss = cal_loss(source, estimate_source, mixture_lengths, device, features_model=self.deep_features_model)
             if not cross_valid:
                 self.optimizer.zero_grad()
                 loss.backward()

@@ -31,7 +31,7 @@ import librosa
 
 class AudioDataset(data.Dataset):
 
-    def __init__(self, json_dir, batch_size, sample_rate=8000, segment=4.0, max_hours=None):
+    def __init__(self, json_dir, batch_size, sample_rate=16000, segment=3.0, max_hours=None):
         """
         Args:
             json_dir: directory including mix.json, s1.json and s2.json

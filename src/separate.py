@@ -63,12 +63,12 @@ def separate(model_path, mix_dir, mix_json, out_dir, use_cuda, sample_rate, batc
 
 
 if __name__ == '__main__':
-    model_path = "../egs/models/DPRNN_SE_LSTM_N_64_B_96_hidden_128_chunk_180_L_6.pth"
+    model_path = "../egs/models/test.pth"
     mix_dir = "../egs/separate"
     mix_json = ""
     out_dir = "../egs/separate/Separated_results"
     use_cuda = 1
-    sample_rate = 8000
+    sample_rate = 16000
     batch_size = 1
 
     separate(model_path, mix_dir, mix_json, out_dir, use_cuda, sample_rate, batch_size)

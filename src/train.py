@@ -12,15 +12,16 @@ from src.conv_tasnet import ConvTasNet
 from src.DPRNN_model import DPRNN
 from torch.utils.data.dataset import random_split
 import math
+from src.deepspeech_model import DeepSpeech
 
 
-def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_from=""):
+def train(data_dir, epochs, batch_size, model_path, model_features_path, max_hours=None, continue_from=""):
     # General config
     # Task related
     json_dir = data_dir
     train_dir = data_dir + "tr"
     sample_rate = 16000
-    segment_len = 4
+    segment_len = 3
 
     # Network architecture
     causal = 1
@@ -30,6 +31,12 @@ def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_fro
     hidden_size = 128
     num_layers = 6
     chunk_size = 180
+
+    # input_size = 48
+    # bottleneck_size = 64
+    # hidden_size = 96
+    # num_layers = 1
+    # chunk_size = 180
     L = 6
     C = 2
 
@@ -57,8 +64,10 @@ def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_fro
     visdom_epoch = 0
     visdom_id = "Conv-TasNet Training"  # TODO: Check what this does
 
+    deep_features_model = DeepSpeech.load_model(model_features_path)
+
     arg_solver = (use_cuda, epochs, half_lr, early_stop, max_grad_norm, save_folder, enable_checkpoint, continue_from,
-                  model_path, print_freq, visdom_enabled, visdom_epoch, visdom_id, device)
+                  model_path, print_freq, visdom_enabled, visdom_epoch, visdom_id, deep_features_model, device)
 
     # Datasets and Dataloaders
     tr_cv_dataset = AudioDataset(train_dir, batch_size,
@@ -75,6 +84,8 @@ def train(data_dir, epochs, batch_size, model_path, max_hours=None, continue_fro
 
     model = DPRNN(input_size, bottleneck_size, hidden_size, C, num_layers=num_layers,
                   chunk_size=chunk_size, rnn_type=rnn_type, L=L, norm_type=norm_type, causal=causal)
+
+
     if use_cuda:
         model = torch.nn.DataParallel(model)
         model.cuda()

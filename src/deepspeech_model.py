@@ -186,11 +186,11 @@ class DeepSpeech(nn.Module):
         self.inference_softmax = InferenceBatchSoftmax()
 
         # Using this for Loss function, so don't want to update gradients
-        # num_params = 0
-        # for param in self.parameters():
-        #     num_params += torch.numel(param)
-        #     param.requires_grad = False
-        # print(num_params)
+        num_params = 0
+        for param in self.parameters():
+            num_params += torch.numel(param)
+            param.requires_grad = False
+        print("Number of Parameters in DeepSpeech: {0:.2f}M".format(num_params/1e6))
 
     def forward(self, x, lengths):
         lengths = lengths.cpu().int()
@@ -201,8 +201,10 @@ class DeepSpeech(nn.Module):
         x = x.view(sizes[0], sizes[1] * sizes[2], sizes[3])  # Collapse feature dimension
         x = x.transpose(1, 2).transpose(0, 1).contiguous()  # TxBxH, , H = freq x channels
 
-        for rnn in self.rnns:
+        for i, rnn in enumerate(self.rnns):
             x = rnn(x, output_lengths)
+            if i == 1:
+                break
 
         # if not self.bidirectional:  # no need for lookahead layer in bidirectional
         #     x = self.lookahead(x)
