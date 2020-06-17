@@ -5,7 +5,6 @@
 
 
 import torch
-
 from src.data import AudioDataLoader, AudioDataset
 from src.solver import Solver
 from src.conv_tasnet import ConvTasNet
@@ -18,10 +17,9 @@ from src.deepspeech_model import DeepSpeech
 def train(data_dir, epochs, batch_size, model_path, model_features_path, max_hours=None, continue_from=""):
     # General config
     # Task related
-    json_dir = data_dir
     train_dir = data_dir + "tr"
     sample_rate = 16000
-    segment_len = 3
+    segment_len = 4
 
     # Network architecture
     causal = 1
@@ -59,9 +57,9 @@ def train(data_dir, epochs, batch_size, model_path, model_features_path, max_hou
     # save and visualize
     save_folder = "../egs/models"
     enable_checkpoint = 0  # enables saving checkpoints
-    print_freq = 500
-    visdom_enabled = 0
-    visdom_epoch = 0
+    print_freq = 100
+    visdom_enabled = 1
+    visdom_epoch = 1
     visdom_id = "Conv-TasNet Training"  # TODO: Check what this does
 
     deep_features_model = DeepSpeech.load_model(model_features_path)
@@ -84,7 +82,6 @@ def train(data_dir, epochs, batch_size, model_path, model_features_path, max_hou
 
     model = DPRNN(input_size, bottleneck_size, hidden_size, C, num_layers=num_layers,
                   chunk_size=chunk_size, rnn_type=rnn_type, L=L, norm_type=norm_type, causal=causal)
-
 
     if use_cuda:
         model = torch.nn.DataParallel(model)

@@ -203,7 +203,7 @@ class DeepSpeech(nn.Module):
 
         for i, rnn in enumerate(self.rnns):
             x = rnn(x, output_lengths)
-            if i == 1:
+            if i == 3:
                 break
 
         # if not self.bidirectional:  # no need for lookahead layer in bidirectional
