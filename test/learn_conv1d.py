@@ -44,8 +44,21 @@ class test_class(nn.Module):
 
 
 if __name__ == '__main__':
-    bla = test_class()
-    a = torch.ones(1,50,200)
-    model = nn.Sequential(bla, nn.Conv1d(100,50,3))
-    print(model(a))
+    import torch
+    import os
+    from fairseq.models.wav2vec import Wav2VecModel
 
+    cp = torch.load('../egs/models/loss_models/wav2vec_large.pt')
+    model = Wav2VecModel.build_model(cp['args'], task=None)
+    model.load_state_dict(cp['model'])
+    model.eval()
+
+    wav_input_16khz = torch.randn(3, 10000)
+    print(wav_input_16khz.shape)
+    z = model.feature_extractor(wav_input_16khz)
+    z2 = model.feature_extractor(wav_input_16khz*127)
+    print(torch.mean(z))
+    print(torch.mean(z2))
+    print(z.shape)
+    c = model.feature_aggregator(z)
+    print(c.shape)

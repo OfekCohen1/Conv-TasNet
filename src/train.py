@@ -12,6 +12,7 @@ from src.DPRNN_model import DPRNN
 from torch.utils.data.dataset import random_split
 import math
 from src.deepspeech_model import DeepSpeech
+from fairseq.models.wav2vec import Wav2VecModel
 
 
 def train(data_dir, epochs, batch_size, model_path, model_features_path, max_hours=None, continue_from=""):
@@ -62,7 +63,13 @@ def train(data_dir, epochs, batch_size, model_path, model_features_path, max_hou
     visdom_epoch = 1
     visdom_id = "Conv-TasNet Training"  # TODO: Check what this does
 
-    deep_features_model = DeepSpeech.load_model(model_features_path)
+    # deep_features_model = DeepSpeech.load_model(model_features_path)
+    # deep_features_model.eval()
+
+    cp = torch.load('../egs/models/loss_models/wav2vec_large.pt')
+    deep_features_model = Wav2VecModel.build_model(cp['args'], task=None)
+    deep_features_model.load_state_dict(cp['model'])
+    deep_features_model.eval()
 
     arg_solver = (use_cuda, epochs, half_lr, early_stop, max_grad_norm, save_folder, enable_checkpoint, continue_from,
                   model_path, print_freq, visdom_enabled, visdom_epoch, visdom_id, deep_features_model, device)

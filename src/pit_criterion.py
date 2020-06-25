@@ -29,8 +29,8 @@ def cal_loss(source, estimate_source, source_lengths, device, features_model=Non
     assert features_model is not None
     loss = calc_deep_feature_loss(source, estimate_source, source_lengths, features_model, device)
     # loss2 = 0.0 - torch.mean(calc_si_sdr(source, estimate_source, source_lengths))
-    import GPUtil
-    GPUtil.showinitialization()
+    # import GPUtil
+    # GPUtil.showinitialization()
     return loss
 
 
@@ -58,10 +58,52 @@ def calc_si_sdr(source, estimate_source, source_lengths):
     return si_sdr
 
 
+# def calc_deep_feature_loss(source, estimate_source, source_lengths, deep_features_model, device):
+#     """
+#     Calculates deep feature loss using the DeepSpeech2 ASR model.
+#     Code and model from: https://github.com/SeanNaren/deepspeech.pytorch
+#     Args:
+#         source: [B, T], B is batch size
+#         estimate_source: [B, T]
+#         source_lengths: [B], each item is between [0, T]
+#     """
+#     # TODO: Make sure that output sigal behaves like signal from librosa.load
+#     #   ie check Decoder output for clean signal
+#     B, T = source.size()
+#     # model_dir = "../egs/models/loss_models/librispeech_pretrained_v2.pth"
+#     # deep_features_model = DeepSpeech.load_model(model_dir)
+#     deep_features_model = deep_features_model.to(device)
+#
+#     audio_conf = deep_features_model.audio_conf
+#     window_stride = audio_conf['window_stride']
+#     window_size = audio_conf['window_size']
+#     sample_rate = audio_conf['sample_rate']
+#     win_length =  int(sample_rate * window_size)
+#     windows = {'hamming':  torch.hamming_window(win_length).to(device), 'hann': torch.hann_window(win_length).to(device),
+#                'blackman': torch.blackman_window(win_length).to(device),
+#                'bartlett': torch.bartlett_window(win_length).to(device)}
+#     window = windows.get(audio_conf['window'], windows['hamming'])
+#
+#     spect_source_list, spect_estimate_list = [], []
+#     for b in range(B):
+#         spect_source_list.append(parse_audio(source[b, :], sample_rate, window_size,
+#                                                          window_stride, window, device, normalize=True))
+#         spect_estimate_list.append(parse_audio(estimate_source[b, :], sample_rate, window_size,
+#                                                            window_stride, window, device, normalize=True))
+#
+#     batch_estimate, batch_estimate_sizes = arrange_batch(spect_estimate_list, device)
+#     batch_source, batch_source_sizes = arrange_batch(spect_source_list, device )
+#
+#     features_source, _ = deep_features_model(batch_source, batch_source_sizes)
+#     features_estimate, _ = deep_features_model(batch_estimate, batch_estimate_sizes)
+#
+#     mse_loss = torch.nn.MSELoss()
+#     return mse_loss(features_estimate, features_source)
+
+
 def calc_deep_feature_loss(source, estimate_source, source_lengths, deep_features_model, device):
     """
-    Calculates deep feature loss using the DeepSpeech2 ASR model.
-    Code and model from: https://github.com/SeanNaren/deepspeech.pytorch
+    Calculates deep feature loss using the Wav2Vec Model.
     Args:
         source: [B, T], B is batch size
         estimate_source: [B, T]
@@ -70,36 +112,16 @@ def calc_deep_feature_loss(source, estimate_source, source_lengths, deep_feature
     # TODO: Make sure that output sigal behaves like signal from librosa.load
     #   ie check Decoder output for clean signal
     B, T = source.size()
-    # model_dir = "../egs/models/loss_models/librispeech_pretrained_v2.pth"
-    # deep_features_model = DeepSpeech.load_model(model_dir)
     deep_features_model = deep_features_model.to(device)
 
-    audio_conf = deep_features_model.audio_conf
-    window_stride = audio_conf['window_stride']
-    window_size = audio_conf['window_size']
-    sample_rate = audio_conf['sample_rate']
-    win_length =  int(sample_rate * window_size)
-    windows = {'hamming':  torch.hamming_window(win_length).to(device), 'hann': torch.hann_window(win_length).to(device),
-               'blackman': torch.blackman_window(win_length).to(device),
-               'bartlett': torch.bartlett_window(win_length).to(device)}
-    window = windows.get(audio_conf['window'], windows['hamming'])
+    features_source = deep_features_model.feature_extractor(source)
+    features_source = deep_features_model.feature_aggregator(features_source)
 
-    spect_source_list, spect_estimate_list = [], []
-    for b in range(B):
-        spect_source_list.append(parse_audio(source[b, :], sample_rate, window_size,
-                                                         window_stride, window, device, normalize=True))
-        spect_estimate_list.append(parse_audio(estimate_source[b, :], sample_rate, window_size,
-                                                           window_stride, window, device, normalize=True))
-
-    batch_estimate, batch_estimate_sizes = arrange_batch(spect_estimate_list, device)
-    batch_source, batch_source_sizes = arrange_batch(spect_source_list, device )
-
-    features_source, _ = deep_features_model(batch_source, batch_source_sizes)
-    features_estimate, _ = deep_features_model(batch_estimate, batch_estimate_sizes)
+    features_estimate = deep_features_model.feature_extractor(estimate_source)
+    features_estimate = deep_features_model.feature_aggregator(features_estimate)
 
     mse_loss = torch.nn.MSELoss()
     return mse_loss(features_estimate, features_source)
-
 
 def cal_si_snr_with_pit(source, estimate_source, source_lengths):
     """Calculate SI-SNR with PIT training.
