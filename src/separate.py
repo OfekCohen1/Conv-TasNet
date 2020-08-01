@@ -13,6 +13,7 @@ from src.data import EvalDataLoader, EvalDataset
 from src.conv_tasnet import ConvTasNet
 from src.utils import remove_pad
 from src.DPRNN_model import DPRNN
+from tqdm import tqdm
 
 
 def separate(model_path, mix_dir, mix_json, out_dir, use_cuda, sample_rate, batch_size):
@@ -54,18 +55,19 @@ def separate(model_path, mix_dir, mix_json, out_dir, use_cuda, sample_rate, batc
             flat_estimate = remove_pad(estimate_source, mix_lengths)
             mixture = remove_pad(mixture, mix_lengths)
             # Write result
-            for i, filename in enumerate(filenames):
+            for i in tqdm(range(len(filenames))):
+                filename = filenames[i]
                 filename = os.path.join(out_dir,
                                         os.path.basename(filename).strip('.wav'))
-                write(mixture[i], filename + '.wav')
+                # write(mixture[i], filename + '.wav') # No need to write noisy audio
                 C = flat_estimate[i].shape[0]
                 clean = flat_estimate[i][0]
                 for c in range(C):
-                    write(clean, filename + '_clean.wav')
+                    write(clean, filename + '.wav')
 
 
 if __name__ == '__main__':
-    model_path = "../egs/models/DPRNN_SE_LSTM_N_64_B_96_hidden_128_chunk_180_L_6_sr_16k.pth"
+    model_path = "../egs/models/Librispeeech_DPRNN_SE_LSTM_N_64_B_96_hidden_128_chunk_180_L_6_sr_16k.pth"
     mix_dir = "../egs/separate"
     mix_json = ""
     out_dir = "../egs/separate/Separated_results"

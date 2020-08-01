@@ -27,7 +27,7 @@ def preprocess_one_dir(data_dir, json_dir, json_filename, sample_rate=8000):
 
 
 def preprocess(data_dir, json_dir, sample_rate):
-    for data_type in ['tr', 'cv', 'tt']:
+    for data_type in ['tr']:
         for speaker in ['mix', 'clean', 'noise']:
             preprocess_one_dir(os.path.join(data_dir, data_type, speaker),
                                os.path.join(json_dir, data_type),

@@ -11,24 +11,12 @@ from src.utils import overlap_and_add
 EPS = 1e-8
 
 
-class DPRNN(nn.Module):
+# Temporal frame RNN
+
+class TPRNN(nn.Module):
     def __init__(self, input_size, bottleneck_size, hidden_size, C,
-                 num_layers=6, chunk_size=180, rnn_type='LSTM', L=16, norm_type="cLN", causal=True):
-        """
-        Args:
-            N: Number of filters in autoencoder
-            L: Length of the filters (in samples)
-            B: Number of channels in bottleneck 1 × 1-conv block
-            H: Number of channels in convolutional blocks
-            P: Kernel size in convolutional blocks
-            X: Number of convolutional blocks in each repeat
-            R: Number of repeats
-            C: Number of speakers
-            norm_type: BN, gLN, cLN
-            causal: causal or non-causal
-            mask_nonlinear: use which non-linear function to generate mask
-        """
-        super(DPRNN, self).__init__()
+                 num_layers=6, rnn_type='LSTM', L=16, norm_type="cLN", causal=True):
+        super(TPRNN, self).__init__()
         # Hyper-parameter
         self.input_size = input_size
         self.bottleneck_size = bottleneck_size
@@ -37,7 +25,6 @@ class DPRNN(nn.Module):
         self.norm_type = norm_type
         self.causal = causal
         self.L = L
-        self.chunk_size = chunk_size
         self.output_size = bottleneck_size
         self.C = C
         self.rnn_type = rnn_type
@@ -46,17 +33,21 @@ class DPRNN(nn.Module):
         # Components
         self.encoder = Encoder(L, input_size)
 
-        self.bottleneck_conv1v1 = nn.Conv1d(input_size, bottleneck_size, 1, bias=False)
-        self.separator = DPRNN_separator(rnn_type, bottleneck_size, hidden_size, self.output_size,
+        self.bottleneck_conv1v1 = nn.Sequential(chose_norm(norm_type, input_size),
+                                                nn.Conv1d(input_size, bottleneck_size, 1, bias=False))
+
+        self.separator = TPRNN_separator(rnn_type, bottleneck_size, hidden_size, self.output_size,
                                          num_layers=num_layers, bidirectional=bidirectional)
+
+        self.mask_conv1v1 = nn.Conv1d(bottleneck_size, input_size * C, 1, bias=False)
+
+        self.decoder = Decoder(input_size, L)
+
         num_params = 0
         for paramter in self.separator.parameters():
             num_params += torch.numel(paramter)
         print("Model size is:" + str(num_params / 1e6))
 
-        self.mask_conv1v1 = nn.Conv1d(bottleneck_size, input_size * C, 1, bias=False)
-
-        self.decoder = Decoder(input_size, L)
         # init
         for p in self.parameters():
             if p.dim() > 1:
@@ -70,11 +61,9 @@ class DPRNN(nn.Module):
             est_source: [M, C, T]
         """
         mixture_w = self.encoder(mixture)  # M x N x K
-        mixture_bottleneck = self.bottleneck_conv1v1(mixture_w)
-        mixture_bottleneck, rest = self.split_feature(mixture_bottleneck, self.chunk_size)  # M x B x chunk_size x S
-        est_mask = self.separator(mixture_bottleneck)  # M x B x chunk_size x S
-        est_mask = self.merge_feature(est_mask, rest)
-        est_mask = self.mask_conv1v1(est_mask)
+        mixture_bottleneck = self.bottleneck_conv1v1(mixture_w)  # M x B x K
+        est_mask = self.separator(mixture_bottleneck)  # M x B x K
+        est_mask = self.mask_conv1v1(est_mask)  # M x N x K
         M, _, K = est_mask.shape
         est_mask = est_mask.view(M, self.C, self.input_size, K)
 
@@ -100,7 +89,8 @@ class DPRNN(nn.Module):
     @classmethod
     def load_model_from_package(cls, package):
         model = cls(package['input_size'], package['bottleneck_size'], package['hidden_size'], package['C'],
-                    num_layers=package['num_layers'], chunk_size=package['chunk_size'], rnn_type=package['rnn_type'], L=package['L'],
+                    num_layers=package['num_layers'], rnn_type=package['rnn_type'],
+                    L=package['L'],
                     norm_type=package['norm_type'], causal=package['causal'])
         model.load_state_dict(package['state_dict'])
         return model
@@ -109,8 +99,10 @@ class DPRNN(nn.Module):
     def serialize(model, optimizer, epoch, tr_loss=None, cv_loss=None):
         package = {
             # hyper-parameter
-            'input_size': model.input_size, 'bottleneck_size': model.bottleneck_size, 'hidden_size': model.hidden_size,'C': model.C,
-            'num_layers': model.num_layers, 'chunk_size': model.chunk_size, 'rnn_type': model.rnn_type, 'L': model.L, 'norm_type': model.norm_type,
+            'input_size': model.input_size, 'bottleneck_size': model.bottleneck_size, 'hidden_size': model.hidden_size,
+            'C': model.C,
+            'num_layers': model.num_layers, 'rnn_type': model.rnn_type, 'L': model.L,
+            'norm_type': model.norm_type,
             'causal': model.causal,
             # state
             'state_dict': model.state_dict(),
@@ -194,7 +186,6 @@ class Encoder(nn.Module):
         mix_wave = torch.unsqueeze(mix_wave, 1)  # [M, 1, T]
         mixture_w = functional.relu(self.conv1d_U(mix_wave))  # [M, N, K]
 
-        # Segment from [M, N, K] to [M, N, chunk_len, S]
         return mixture_w
 
 
@@ -224,9 +215,9 @@ class Decoder(nn.Module):
         return est_source
 
 
-class DPRNN_separator(nn.Module):
+class TPRNN_separator(nn.Module):
     """
-    Deep duaL-path RNN.
+    Currently input_size = hidden_size = output_size = B
 
     args:
         rnn_type: string, select from 'RNN', 'LSTM' and 'GRU'.
@@ -241,58 +232,30 @@ class DPRNN_separator(nn.Module):
 
     def __init__(self, rnn_type, input_size, hidden_size, output_size,
                  dropout=0, num_layers=1, bidirectional=True):
-        super(DPRNN_separator, self).__init__()
+        super(TPRNN_separator, self).__init__()
 
         self.input_size = input_size
         self.output_size = output_size
-        self.hidden_size = hidden_size
+        self.hidden_size = hidden_size  # Currently input_size = hidden_size = B
         norm_type = 'gLN' if bidirectional else 'cLN'
-        # dual-path RNN
-        self.in_segment_rnn = nn.ModuleList([])
-        self.between_segments_rnn = nn.ModuleList([])
-        self.in_segment_norm = nn.ModuleList([])
-        self.between_segments_norm = nn.ModuleList([])
-        for i in range(num_layers):
-            self.in_segment_rnn.append(SingleRNN(rnn_type, input_size, hidden_size, dropout,
-                                                 bidirectional=True))  # intra-segment RNN is always noncausal
-            self.between_segments_rnn.append(
-                SingleRNN(rnn_type, input_size, hidden_size, dropout, bidirectional=bidirectional))
-            self.in_segment_norm.append(chose_norm(norm_type, input_size))
-            self.between_segments_norm.append(chose_norm(norm_type, input_size))
 
-        # output layer
-        # self.output = nn.Sequential(nn.PReLU(),
-        #                             nn.Conv2d(input_size, output_size, 1)
-        #                             )
-        self.output = nn.Sequential(nn.PReLU())
+        self.rnn_chain = nn.ModuleList([])
+        self.norm_chain = nn.ModuleList([])
+        self.prelu_chain = nn.ModuleList([])
+        for i in range(num_layers):
+            self.rnn_chain.append(SingleRNN(rnn_type, input_size, hidden_size, dropout, bidirectional))
+            self.norm_chain.append(chose_norm(norm_type, input_size))
+            self.prelu_chain.append(nn.PReLU())
 
     def forward(self, input):
-        # input shape: batch, N, chunk_size, S
-        # apply RNN on chunk_size first and then S
-        # TODO: Check between 1) norm before reshape, and 2) norm after reshape. currently norm before reshape
-        batch_size, _, chunk_size, S = input.shape
-        input = input.float()
+        # input shape: batch, B, K
+
         output = input
-        for i in range(len(self.in_segment_rnn)):
-            row_input = output.permute(0, 3, 2, 1).contiguous().view(batch_size * S, chunk_size,
-                                                                     -1)  # B*S, chunk_size, N
-            # print(row_input.shape)
-            row_output = self.in_segment_rnn[i](row_input)  # B*S, chunk_size, H
-            row_output = row_output.view(batch_size, S, chunk_size, -1).permute(0, 3, 2,
-                                                                                1).contiguous()  # B, N, chunk_size, S
-            row_output = self.in_segment_norm[i](row_output)
-            output = output + row_output
-
-            col_input = output.permute(0, 2, 3, 1).contiguous().view(batch_size * chunk_size, S,
-                                                                     -1)  # B*chunk_size, S, N
-            col_output = self.between_segments_rnn[i](col_input)  # B*chunk_size, S, H
-            col_output = col_output.view(batch_size, chunk_size, S, -1).permute(0, 3, 1,
-                                                                                2).contiguous()  # B, N, chunk_size, S
-            col_output = self.between_segments_norm[i](col_output)
-            output = output + col_output
-
-        output = self.output(output)
-
+        for i in range(len(self.rnn_chain)):
+            rnn_output = self.rnn_chain[i](output.permute(0,2,1))
+            rnn_output = rnn_output.permute(0, 2, 1)
+            normalized_output = self.norm_chain[i](rnn_output)
+            output = output + self.prelu_chain[i](normalized_output)
         return output
 
 
@@ -321,13 +284,13 @@ class SingleRNN(nn.Module):
                                          bidirectional=bidirectional)
 
         # linear projection layer
-        self.proj = nn.Linear(hidden_size * self.num_direction, input_size)
+        # self.proj = nn.Linear(hidden_size * self.num_direction, input_size)
 
     def forward(self, input):
         # input shape: batch, seq, dim
         output = input
         rnn_output, _ = self.rnn(output)
-        rnn_output = self.proj(rnn_output.contiguous().view(-1, rnn_output.shape[2])).view(output.shape)
+        # rnn_output = self.proj(rnn_output.contiguous().view(-1, rnn_output.shape[2])).view(output.shape)
         return rnn_output
 
 
@@ -356,20 +319,20 @@ def chose_norm(norm_type, channel_size):
     if norm_type == "gLN":
         return GlobalLayerNorm(channel_size)
     elif norm_type == "cLN":
-        return InterChunkNorm(channel_size)
+        return ChannelNorm(channel_size)
     else:  # norm_type == "BN":
         # Given input (M, C, K), nn.BatchNorm1d(C) will accumulate statics
         # along M and K, so this BN usage is right.
         return nn.BatchNorm1d(channel_size)
 
 
-class InterChunkNorm(nn.Module):
+class ChannelNorm(nn.Module):
     """Inter Chunk Normalization (cLN)"""
 
     def __init__(self, channel_size):
-        super(InterChunkNorm, self).__init__()
-        self.gamma = nn.Parameter(torch.Tensor(1, channel_size, 1, 1))  # [1, N, 1, 1]
-        self.beta = nn.Parameter(torch.Tensor(1, channel_size, 1, 1))  # [1, N, 1, 1]
+        super(ChannelNorm, self).__init__()
+        self.gamma = nn.Parameter(torch.Tensor(1, channel_size, 1))  # [1, N, 1]
+        self.beta = nn.Parameter(torch.Tensor(1, channel_size, 1))  # [1, N, 1]
         self.reset_parameters()
 
     def reset_parameters(self):
@@ -379,12 +342,12 @@ class InterChunkNorm(nn.Module):
     def forward(self, y):
         """
         Args:
-            y: [M, N, chunk, S], M is batch size, N is channel size, chunk is Chunk length, S is num of chunks.
+            y: [M, N, K], M is batch size, N is channel size, K is signal length
         Returns:
-            cLN_y: [M, N, chunk, S]
+            cLN_y: [M, N, K]
         """
-        mean = torch.mean(y, dim=1, keepdim=True).mean(dim=2, keepdim=True)  # [M, 1, 1, S]
-        var = torch.var(y, dim=1, keepdim=True, unbiased=False)  # [M, 1, 1, S]
+        mean = torch.mean(y, dim=1, keepdim=True)  # [M, 1, K]
+        var = torch.var(y, dim=1, keepdim=True, unbiased=False)  # [M, 1, K]
         cLN_y = self.gamma * (y - mean) / torch.pow(var + EPS, 0.5) + self.beta
         return cLN_y
 
@@ -466,46 +429,3 @@ def merge_feature(input, rest):
 
 if __name__ == "__main__":
     torch.manual_seed(123)
-    # M, N, L, T = 4, 64, 20, 32000
-    # norm_type, causal = "cLN", True
-    # mixture = torch.randint(3, (M, T))
-    #
-    # rnn_type = 'LSTM'
-    # bidirectional = False if causal else True
-    # input_size = N
-    # bottleneck_size = 96
-    # hidden_size = 128
-    # num_layers = 6
-    # chunk_size = 180
-    # # test Encoder
-    # model = DPRNN(input_size, bottleneck_size, hidden_size,
-    #               layer=num_layers, chunk_size=chunk_size, rnn_type=rnn_type,
-    #               L=10, norm_type=norm_type, causal=True)
-    # mixture = mixture.float()
-    #
-    # estimated_stuff = model(mixture)
-    #
-    # encoder = Encoder(L, N)
-    #
-    # bottleneck_conv1v1 = nn.Conv1d(N, bottleneck_size, 1, bias=False)
-    # mask_conv1v1 = nn.Conv1d(bottleneck_size, N * C, 1, bias=False)
-    #
-    # encoder.conv1d_U.weight.data = torch.randint(2, encoder.conv1d_U.weight.size())
-    # mixture_w = encoder(mixture)
-    # print('mixture', mixture)
-    # print('U', encoder.conv1d_U.weight)
-    # print('mixture_w', mixture_w)
-    # print('mixture_w size', mixture_w.size())
-    #
-    #
-    # mixture_w = bottleneck_conv1v1(mixture_w)
-    # mixture_w, rest = split_feature(mixture_w, chunk_size)
-    # # test TemporalConvNet
-    # separator = DPRNN_separator(rnn_type, bottleneck_size, hidden_size, bottleneck_size,
-    #              dropout=0, num_layers=1, bidirectional=bidirectional)
-    # est_mask = separator(mixture_w)
-    # print('est_mask', est_mask)
-    # est_mask = merge_feature(est_mask, rest)
-    # est_mask = mask_conv1v1(est_mask)
-    # M, _, L = est_mask.shape
-    # est_mask = est_mask.view(M, C, N, L)

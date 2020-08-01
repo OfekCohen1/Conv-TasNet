@@ -32,33 +32,48 @@
 
 import torch
 import torch.nn as nn
+from src.DPRNN_model import DPRNN
+
 
 class test_class(nn.Module):
 
     def __init__(self):
         super(test_class, self).__init__()
-        self.conv1 = nn.Conv1d(50,100,3)
-        self.conv2 = nn.Conv1d(50,100,3)
+        self.conv1 = nn.Conv1d(50, 100, 3)
+        self.conv2 = nn.Conv1d(50, 100, 3)
+
     def forward(self, x):
         return self.conv1(x), self.conv2(x)
 
 
+# Checks lookahead of model
+def check_lookahead(lookahead_time, model, sample_rate):
+    lookahead_samples = int(lookahead_time * sample_rate)
+    input_wav = torch.randn(3, 32000).to('cuda')
+    T = 7014
+    with torch.no_grad():
+        output_wav = model(input_wav)[:, 0, :]  # Only take signal output, not noise
+        # I changed from 5000 and after, which means this shouldn't influence things before (5000-lookahead)
+        input_wav[:, T:] = 0
+        output_changed_wav = model(input_wav)[:, 0, :]
+        lookahead_works = (output_changed_wav[:, :(T - lookahead_samples)] -
+                           output_wav[:, :(T - lookahead_samples)]).sum().item()
+        print(lookahead_works)
+        if abs(lookahead_works) < 1e-3:
+            print('Lookahead is smaller than {0:0.2f}ms, WORKS AS INTENDED'.format(lookahead_time * 1e3))
+        else:
+            print('Lookahead is BIGGER than {0:0.2f}ms, DOES NOT WORK'.format(lookahead_time * 1e3))
+
+
 if __name__ == '__main__':
-    import torch
-    import os
-    from fairseq.models.wav2vec import Wav2VecModel
+    model_path = "../egs/models/DPRNN_SE_LSTM_N_64_B_96_hidden_128_chunk_180_L_6_sr_16k.pth"
+    sample_rate = 16000
+    # Lookahead should be small to check if it works.
+    chunk_size = 180
+    lookahead_time = chunk_size * 3 / sample_rate
+    # lookahead_time = 30 * 1e-3
+    model = DPRNN.load_model(model_path)
 
-    cp = torch.load('../egs/models/loss_models/wav2vec_large.pt')
-    model = Wav2VecModel.build_model(cp['args'], task=None)
-    model.load_state_dict(cp['model'])
     model.eval()
-
-    wav_input_16khz = torch.randn(3, 10000)
-    print(wav_input_16khz.shape)
-    z = model.feature_extractor(wav_input_16khz)
-    z2 = model.feature_extractor(wav_input_16khz*127)
-    print(torch.mean(z))
-    print(torch.mean(z2))
-    print(z.shape)
-    c = model.feature_aggregator(z)
-    print(c.shape)
+    model.cuda()
+    check_lookahead(lookahead_time, model, sample_rate)
