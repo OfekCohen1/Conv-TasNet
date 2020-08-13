@@ -27,7 +27,7 @@ epochs = 50
 # save and visualize
 
 continue_from = ""
-model_path = "TPRNN.pth"
+model_path = "test.pth"
 # model_features_path = "../egs/models/loss_models/librispeech_pretrained_v2.pth"
 model_features_path = ""
 
@@ -36,9 +36,8 @@ if __name__ == '__main__':
     # sample_rate = 8000
     # preprocess(data_dir, data_dir, sample_rate)
 
-    batch_size = 2
+    batch_size = 1
     max_hours = 30
-    num_workers = 4
     # check_dataset_dir = "../egs/Librispeech_SE_dataset/tr"
     # sample_rate = 16000
     # dataset = AudioDataset(check_dataset_dir, batch_size, segment=4, max_hours=max_hours, sample_rate=sample_rate)

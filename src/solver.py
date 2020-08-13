@@ -199,12 +199,12 @@ class Solver(object):
             # import GPUtil
             total_loss += loss.item()
 
-            # if i % self.print_freq == 0:
-            #    print('Epoch {0} | Iter {1} | Average Loss {2:.3f} | '
-            #          'Current Loss {3:.6f} | {4:.1f} ms/batch'.format(
-            #        epoch + 1, i + 1, total_loss / (i + 1),
-            #        loss.item(), 1000 * (time.time() - start) / (i + 1)),
-            #        flush=True)
+            if i % self.print_freq == 0 and self.print_freq < 10:
+                print('Epoch {0} | Iter {1} | Average Loss {2:.3f} | '
+                      'Current Loss {3:.6f} | {4:.1f} ms/batch'.format(
+                    epoch + 1, i + 1, total_loss / (i + 1),
+                    loss.item(), 1000 * (time.time() - start) / (i + 1)),
+                    flush=True)
 
             # visualizing loss using visdom
             if self.visdom_epoch and not cross_valid:

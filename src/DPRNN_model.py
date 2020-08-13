@@ -109,7 +109,7 @@ class DPRNN(nn.Module):
     def serialize(model, optimizer, epoch, tr_loss=None, cv_loss=None):
         package = {
             # hyper-parameter
-            'input_size': model.input_size, 'bottleneck_size': model.bottleneck_size, 'hidden_size': model.hidden_size,'C': model.C,
+            'input_size': model.input_size, 'bottleneck_size': model.input_size, 'hidden_size': model.hidden_size, 'C': model.C,
             'num_layers': model.num_layers, 'chunk_size': model.chunk_size, 'rnn_type': model.rnn_type, 'L': model.L, 'norm_type': model.norm_type,
             'causal': model.causal,
             # state
