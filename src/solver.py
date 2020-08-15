@@ -181,12 +181,13 @@ class Solver(object):
             vis_iters_loss = torch.Tensor(len(data_loader))
         i = 0
         for (data_package) in tqdm(data_loader):
-            padded_mixture, mixture_lengths, padded_clean_noise = data_package
+            padded_mixture, padded_mixture_omlsa, mixture_lengths, padded_clean_noise = data_package
             if self.use_cuda:
                 padded_mixture = padded_mixture.cuda()
+                padded_mixture_omlsa = padded_mixture_omlsa.cuda()
                 mixture_lengths = mixture_lengths.cuda()
                 padded_clean_noise = padded_clean_noise.cuda()
-            estimate_clean_and_noise = self.model(padded_mixture)
+            estimate_clean_and_noise = self.model(padded_mixture, padded_mixture_omlsa)
             source = padded_clean_noise[:, 0, :]  # first arg is source, second is noise
             estimate_source = estimate_clean_and_noise[:, 0, :]
             loss = cal_loss(source, estimate_source, mixture_lengths, device, features_model=self.deep_features_model)

@@ -218,7 +218,7 @@ def _collate_fn(batch):
     """
     # batch should be located in list
     assert len(batch) == 1
-    mix_segments, sources_segments = load_mixtures_and_sources(batch[0])
+    mix_segments, mix_omlsa_segments, sources_segments = load_mixtures_and_sources(batch[0])
     # get batch of lengths of input sequences
     segment_lengths = np.array([mix.shape[0] for mix in mix_segments])
 
@@ -226,11 +226,13 @@ def _collate_fn(batch):
     pad_value = 0  # converts a list to tensor since pad_value =0
     mix_segments_pad = pad_list([torch.from_numpy(mix).float()
                              for mix in mix_segments], pad_value)
+    mix_omlsa_segments_pad = pad_list([torch.from_numpy(mix).float()
+                                 for mix in mix_omlsa_segments], pad_value)
     segment_lengths = torch.from_numpy(segment_lengths)
     sources_segments_pad = pad_list([torch.from_numpy(s).float()
                             for s in sources_segments], pad_value)
     sources_segments_pad = sources_segments_pad.permute((0, 2, 1)).contiguous()   # N x T x C -> N x C x T
-    return mix_segments_pad, segment_lengths, sources_segments_pad
+    return mix_segments_pad, mix_omlsa_segments_pad, segment_lengths, sources_segments_pad
 
 
 # Eval data part
@@ -320,16 +322,18 @@ def load_mixtures_and_sources(batch):
         sources: a list containing B items, each item is T x C np.ndarray
         T varies from item to item.
     """
-    mix_segments, sources_segments = [], []  # After we cut audio wave into batch_size parts ( maybe 4 )
+    mix_segments, mix_omlsa_segments, sources_segments = [], [], []  # After we cut audio wave into batch_size parts ( maybe 4 )
     mix_infos, clean_infos, noise_infos, i_batch, sample_rate, segment_len, batch_size = batch
     # for each utterance
     for mix_info, clean_info, noise_info in zip(mix_infos, clean_infos, noise_infos):
         mix_path = mix_info[0]
+        mix_omlsa_path = mix_path.replace('mix','mix_omlsa')
         clean_path = clean_info[0]
         noise_path = noise_info[0]
         assert mix_info[1] == clean_info[1] and clean_info[1] == noise_info[1]
         # read wav file
         mix_wave, _ = librosa.load(mix_path, sr=sample_rate)
+        mix_omlsa_wave, _ = librosa.load(mix_omlsa_path, sr=sample_rate)
         clean_wave, _ = librosa.load(clean_path, sr=sample_rate)
         noise_wave, _ = librosa.load(noise_path, sr=sample_rate)
         # merge s1 and s2
@@ -344,12 +348,14 @@ def load_mixtures_and_sources(batch):
         last_batch_index = min(start_index + (batch_size-1) * segment_len +1, utt_len - segment_len + 1)
         for i in range(start_index, last_batch_index, segment_len):
             mix_segments.append(mix_wave[i:i+segment_len])
+            mix_omlsa_segments.append(mix_omlsa_wave[i:i+segment_len])
             sources_segments.append(s12_waves[i:i+segment_len, :])
         if utt_len % segment_len != 0 and i_batch +1 == num_batches_in_utt:
             mix_segments.append(mix_wave[-segment_len:])  # last segment that isn't full
+            mix_omlsa_segments.append(mix_omlsa_wave[-segment_len:])
             sources_segments.append(s12_waves[-segment_len:, :])
 
-    return mix_segments, sources_segments
+    return mix_segments, mix_omlsa_segments, sources_segments
 
 # Function for the Librispeech Dataset
 # def load_mixtures_and_sources(batch):

@@ -9,7 +9,7 @@ from src.data import AudioDataLoader, AudioDataset
 from src.solver import Solver
 from src.conv_tasnet import ConvTasNet
 from src.DPRNN_model import DPRNN
-from src.TARNN import TARNN
+from src.TPRNN_omlsa import TPRNN_omlsa
 from torch.utils.data.dataset import random_split
 import math
 from src.deepspeech_model import DeepSpeech
@@ -25,20 +25,19 @@ def train(data_dir, epochs, batch_size, model_path, model_features_path, max_hou
 
     # Network architecture
     causal = 1
-
-    input_size = 64
-    bottleneck_size = 96
-    hidden_size = bottleneck_size
-    conv_size = 128
-    pyramid_size = 3
-    P = 3
-    X = 8
-    R = 3
-    C = 1  # Currently doesn't output noise, only audio
     rnn_type = 'GRU'
+    input_size = 128
+    bottleneck_size = 256
+    hidden_size = 256
+    num_layers = 3
+
+    # input_size = 48
+    # bottleneck_size = 64
+    # hidden_size = 96
+    # num_layers = 1
+    # chunk_size = 180
     L = 6
-    num_rnns_short_term = 1
-    num_rnns_long_term = 1
+    C = 1  # TODO: Currently doesn't output noise, only audio
 
     norm_type = 'cLN' if causal else 'gLN'
 
@@ -52,7 +51,7 @@ def train(data_dir, epochs, batch_size, model_path, model_features_path, max_hou
     num_workers = 4
     # optimizer
     optimizer_type = "adam"
-    lr = 3e-4
+    lr = 5e-4
     momentum = 0
     l2 = 0  # Weight decay - l2 norm
 
@@ -78,7 +77,7 @@ def train(data_dir, epochs, batch_size, model_path, model_features_path, max_hou
 
     # Datasets and Dataloaders
     tr_cv_dataset = AudioDataset(train_dir, batch_size,
-                                 sample_rate=sample_rate, segment=segment_len, max_hours=max_hours)
+                              sample_rate=sample_rate, segment=segment_len, max_hours=max_hours)
     cv_len = int(0.2 * math.ceil(len(tr_cv_dataset)))
     tr_dataset, cv_dataset = random_split(tr_cv_dataset, [len(tr_cv_dataset) - cv_len, cv_len])
 
@@ -89,9 +88,8 @@ def train(data_dir, epochs, batch_size, model_path, model_features_path, max_hou
                                 num_workers=num_workers)
     data = {'tr_loader': tr_loader, 'cv_loader': cv_loader}
 
-    model = TARNN(input_size, bottleneck_size, hidden_size, conv_size, pyramid_size, P, X, R, C,
-                  rnn_type=rnn_type, L=L, norm_type=norm_type, causal=causal,
-                  num_rnns_long_term=num_rnns_long_term, num_rnns_short_term=num_rnns_short_term)
+    model = TPRNN_omlsa(input_size, bottleneck_size, hidden_size, C, num_layers=num_layers,
+                   rnn_type=rnn_type, L=L, norm_type=norm_type, causal=causal)
 
     if use_cuda:
         model = torch.nn.DataParallel(model)

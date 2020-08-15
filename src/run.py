@@ -36,7 +36,7 @@ if __name__ == '__main__':
     # sample_rate = 8000
     # preprocess(data_dir, data_dir, sample_rate)
 
-    batch_size = 1
+    batch_size = 256
     max_hours = 30
     # check_dataset_dir = "../egs/Librispeech_SE_dataset/tr"
     # sample_rate = 16000
