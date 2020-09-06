@@ -29,6 +29,7 @@ import torch.utils.data as data
 
 import librosa
 
+
 # Class for DNS Challenge dataset, assumes that audio clips are 30 seconds each
 class AudioDataset(data.Dataset):
 
@@ -51,13 +52,15 @@ class AudioDataset(data.Dataset):
             clean_infos = json.load(f)
         with open(noise_json, 'r') as f:
             noise_infos = json.load(f)
+
         # sort it by #samples (impl bucket)
-        def sort(infos): return sorted(
-            infos, key=lambda info: int(info[0].split("_")[-1].split(".")[0]))  # splits to get fileid
+        def sort(infos):
+            return sorted(
+                infos, key=lambda info: int(info[0].split("_")[-1].split(".")[0]))  # splits to get fileid
+
         sorted_mix_infos = sort(mix_infos)
         sorted_clean_infos = sort(clean_infos)
         sorted_noise_infos = sort(noise_infos)
-
 
         # segment length and count dropped utts
         segment_len = int(segment * sample_rate)  # 4s * 8000/s = 32000 samples
@@ -72,9 +75,9 @@ class AudioDataset(data.Dataset):
                 total_len += sample  # Use the whole utterance
                 total_utt += 1
         print("Dropped {} utts({:.2f} h) which are shorter than {} samples".format(
-            drop_utt, drop_len/sample_rate/3600, segment_len))
+            drop_utt, drop_len / sample_rate / 3600, segment_len))
         print("{} utts, total number of undropped hours: {:.2f} hours".format(
-            total_utt, total_len/sample_rate/(3600)))
+            total_utt, total_len / sample_rate / (3600)))
 
         # generate minibach infomations
         minibatch = []
@@ -107,6 +110,7 @@ class AudioDataset(data.Dataset):
 
     def __len__(self):
         return len(self.minibatch)
+
 
 # -----------Dataset for Librspeech, assumes files are 4s------------------
 # class AudioDataset(data.Dataset):
@@ -225,13 +229,13 @@ def _collate_fn(batch):
     # perform padding and convert to tensor
     pad_value = 0  # converts a list to tensor since pad_value =0
     mix_segments_pad = pad_list([torch.from_numpy(mix).float()
-                             for mix in mix_segments], pad_value)
+                                 for mix in mix_segments], pad_value)
     mix_omlsa_segments_pad = pad_list([torch.from_numpy(mix).float()
-                                 for mix in mix_omlsa_segments], pad_value)
+                                       for mix in mix_omlsa_segments], pad_value)
     segment_lengths = torch.from_numpy(segment_lengths)
     sources_segments_pad = pad_list([torch.from_numpy(s).float()
-                            for s in sources_segments], pad_value)
-    sources_segments_pad = sources_segments_pad.permute((0, 2, 1)).contiguous()   # N x T x C -> N x C x T
+                                     for s in sources_segments], pad_value)
+    sources_segments_pad = sources_segments_pad.permute((0, 2, 1)).contiguous()  # N x T x C -> N x C x T
     return mix_segments_pad, mix_omlsa_segments_pad, segment_lengths, sources_segments_pad
 
 
@@ -240,7 +244,7 @@ from src.preprocess import preprocess_one_dir
 
 
 class EvalDataset(data.Dataset):
-    def __init__(self, mix_dir, mix_json, batch_size,  sample_rate=8000):
+    def __init__(self, mix_dir, mix_json, batch_size, sample_rate=8000):
         """
         Args:
             mix_dir: directory including mixture wav files
@@ -255,9 +259,12 @@ class EvalDataset(data.Dataset):
             mix_json = os.path.join(mix_dir, 'mix.json')
         with open(mix_json, 'r') as f:
             mix_infos = json.load(f)
+
         # sort it by #samples (impl bucket)
-        def sort(infos): return sorted(
-            infos, key=lambda info: int(info[1]), reverse=True)
+        def sort(infos):
+            return sorted(
+                infos, key=lambda info: int(info[1]), reverse=True)
+
         sorted_mix_infos = sort(mix_infos)
         # generate minibach infomations
         minibatch = []
@@ -299,7 +306,7 @@ def _collate_fn_eval(batch):
     """
     # batch should be located in list
     assert len(batch) == 1
-    mixtures, filenames = load_mixtures(batch[0])
+    mixtures, mixtures_omlsa, filenames = load_mixtures(batch[0])
 
     # get batch of lengths of input sequences
     ilens = np.array([mix.shape[0] for mix in mixtures])
@@ -308,8 +315,10 @@ def _collate_fn_eval(batch):
     pad_value = 0
     mixtures_pad = pad_list([torch.from_numpy(mix).float()
                              for mix in mixtures], pad_value)
+    mixtures_omlsa_pad = pad_list([torch.from_numpy(mix).float()
+                                   for mix in mixtures_omlsa], pad_value)
     ilens = torch.from_numpy(ilens)
-    return mixtures_pad, ilens, filenames
+    return mixtures_pad, mixtures_omlsa_pad, ilens, filenames
 
 
 # ------------------------------ utils ------------------------------------
@@ -327,7 +336,7 @@ def load_mixtures_and_sources(batch):
     # for each utterance
     for mix_info, clean_info, noise_info in zip(mix_infos, clean_infos, noise_infos):
         mix_path = mix_info[0]
-        mix_omlsa_path = mix_path.replace('mix','mix_omlsa')
+        mix_omlsa_path = mix_path.replace('clean', 'mix_omlsa', 1)
         clean_path = clean_info[0]
         noise_path = noise_info[0]
         assert mix_info[1] == clean_info[1] and clean_info[1] == noise_info[1]
@@ -345,17 +354,18 @@ def load_mixtures_and_sources(batch):
         start_index = i_batch * (batch_size * segment_len)
         num_segments = math.ceil(utt_len / segment_len)
         num_batches_in_utt = math.ceil(num_segments / batch_size)
-        last_batch_index = min(start_index + (batch_size-1) * segment_len +1, utt_len - segment_len + 1)
+        last_batch_index = min(start_index + (batch_size - 1) * segment_len + 1, utt_len - segment_len + 1)
         for i in range(start_index, last_batch_index, segment_len):
-            mix_segments.append(mix_wave[i:i+segment_len])
-            mix_omlsa_segments.append(mix_omlsa_wave[i:i+segment_len])
-            sources_segments.append(s12_waves[i:i+segment_len, :])
-        if utt_len % segment_len != 0 and i_batch +1 == num_batches_in_utt:
+            mix_segments.append(mix_wave[i:i + segment_len])
+            mix_omlsa_segments.append(mix_omlsa_wave[i:i + segment_len])
+            sources_segments.append(s12_waves[i:i + segment_len, :])
+        if utt_len % segment_len != 0 and i_batch + 1 == num_batches_in_utt:
             mix_segments.append(mix_wave[-segment_len:])  # last segment that isn't full
             mix_omlsa_segments.append(mix_omlsa_wave[-segment_len:])
             sources_segments.append(s12_waves[-segment_len:, :])
 
     return mix_segments, mix_omlsa_segments, sources_segments
+
 
 # Function for the Librispeech Dataset
 # def load_mixtures_and_sources(batch):
@@ -404,16 +414,19 @@ def load_mixtures(batch):
         filenames: a list containing B strings
         T varies from item to item.
     """
-    mixtures, filenames = [], []
+    mixtures, mixtures_omlsa, filenames = [], [], []
     mix_infos, sample_rate = batch
     # for each utterance
     for mix_info in mix_infos:
         mix_path = mix_info[0]
+        mix_omlsa_path = mix_path.replace('noisy', 'mix_omlsa', 1)
         # read wav file
         mix, _ = librosa.load(mix_path, sr=sample_rate)
+        mix_omlsa, _ = librosa.load(mix_omlsa_path, sr=sample_rate)
         mixtures.append(mix)
+        mixtures_omlsa.append(mix_omlsa)
         filenames.append(mix_path)
-    return mixtures, filenames
+    return mixtures, mixtures_omlsa, filenames
 
 
 def pad_list(xs, pad_value):
@@ -422,7 +435,7 @@ def pad_list(xs, pad_value):
     n_batch = len(xs)
     max_len = max(x.size(0) for x in xs)
     # xs[0].size()[1:] means put it only if dimension exists
-    pad = xs[0].new(n_batch, max_len, * xs[0].size()[1:]).fill_(pad_value)
+    pad = xs[0].new(n_batch, max_len, *xs[0].size()[1:]).fill_(pad_value)
     for i in range(n_batch):
         pad[i, :xs[i].size(0)] = xs[i]
     return pad
