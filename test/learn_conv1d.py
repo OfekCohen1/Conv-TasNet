@@ -33,15 +33,16 @@
 import torch
 import torch.nn as nn
 
+
 class test_class(nn.Module):
 
     def __init__(self):
         super(test_class, self).__init__()
-        self.conv1 = nn.Conv1d(50,100,3)
-        self.conv2 = nn.Conv1d(50,100,3)
+        self.conv1 = nn.Conv1d(50, 100, 3)
+        self.conv2 = nn.Conv1d(50, 100, 3)
+
     def forward(self, x):
         return self.conv1(x), self.conv2(x)
-
 
 if __name__ == '__main__':
     import torch
@@ -56,7 +57,7 @@ if __name__ == '__main__':
     wav_input_16khz = torch.randn(3, 10000)
     print(wav_input_16khz.shape)
     z = model.feature_extractor(wav_input_16khz)
-    z2 = model.feature_extractor(wav_input_16khz*127)
+    z2 = model.feature_extractor(wav_input_16khz * 127)
     print(torch.mean(z))
     print(torch.mean(z2))
     print(z.shape)

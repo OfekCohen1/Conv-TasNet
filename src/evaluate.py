@@ -17,10 +17,7 @@ from src.conv_tasnet import ConvTasNet
 from src.utils import remove_pad
 
 
-
 def evaluate(model_path, data_dir, calc_sdr, use_cuda, sample_rate, batch_size):
-
-
     total_SISNRi = 0
     total_SDRi = 0
     total_cnt = 0
@@ -86,7 +83,7 @@ def cal_SDRi(src_ref, src_est, mix):
     src_anchor = np.stack([mix, mix], axis=0)
     sdr, sir, sar, popt = bss_eval_sources(src_ref, src_est)
     sdr0, sir0, sar0, popt0 = bss_eval_sources(src_ref, src_anchor)
-    avg_SDRi = ((sdr[0]-sdr0[0]) + (sdr[1]-sdr0[1])) / 2
+    avg_SDRi = ((sdr[0] - sdr0[0]) + (sdr[1] - sdr0[1])) / 2
     # print("SDRi1: {0:.2f}, SDRi2: {1:.2f}".format(sdr[0]-sdr0[0], sdr[1]-sdr0[1]))
     return avg_SDRi
 
@@ -130,12 +127,43 @@ def cal_SISNR(ref_sig, out_sig, eps=1e-8):
     return sisnr
 
 
+def calc_num_params(model):
+    num_params = 0
+    for paramter in model.parameters():
+        if paramter.requires_grad:
+            num_params += torch.numel(paramter)
+    print("Model size is: {0:.2f}M parameters".format(num_params / 1e6))
+    return num_params / 1e6
+
+
+def create_input_for_model(batch_size, sample_length, model_type):
+    if model_type == 'TASNET' or model_type == 'DPRNN' or model_type == 'TPRNN':
+        dummy_input = torch.rand(batch_size, sample_length)
+    else:  # In the future add other models
+        dummy_input = torch.rand(batch_size, sample_length)
+    return dummy_input
+
+
+def count_macs_for_forward(model, model_name, mode='cpu',
+                           sample_length=8000, batch_size=4):
+    from thop import profile
+    mixture = create_input_for_model(batch_size, sample_length,
+                                     model_name)
+    model.eval()
+    if mode == 'gpu':
+        mixture = mixture.cuda()
+        model.cuda()
+    macs, _ = profile(model, inputs=(mixture,))
+    print('GMACS: {}'.format(round(macs / 10 ** 9, 3)))
+    return macs
+
+
 if __name__ == '__main__':
     model_path = ""  # TODO: Add this
     data_dir = "../egs/wsj0-mix/2speakers/wav8k/min/"  # TODO: Add this, includes jsons
-    calc_sdr = False  # sdr calc is slow
-    use_cuda = 1
-    sample_rate = 8000
-    batch_size = 3
-
-    evaluate(model_path, data_dir, calc_sdr, use_cuda, sample_rate, batch_size)
+    # calc_sdr = False  # sdr calc is slow
+    # use_cuda = 1
+    # sample_rate = 8000
+    # batch_size = 3
+    #
+    # evaluate(model_path, data_dir, calc_sdr, use_cuda, sample_rate, batch_size)

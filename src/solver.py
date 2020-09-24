@@ -186,9 +186,8 @@ class Solver(object):
                 padded_mixture = padded_mixture.cuda()
                 mixture_lengths = mixture_lengths.cuda()
                 padded_clean_noise = padded_clean_noise.cuda()
-            estimate_clean_and_noise = self.model(padded_mixture)
+            estimate_source = self.model(padded_mixture)
             source = padded_clean_noise[:, 0, :]  # first arg is source, second is noise
-            estimate_source = estimate_clean_and_noise[:, 0, :]
             loss = cal_loss(source, estimate_source, mixture_lengths, device, features_model=self.deep_features_model)
             if not cross_valid:
                 self.optimizer.zero_grad()

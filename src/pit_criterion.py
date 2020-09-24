@@ -26,9 +26,9 @@ def cal_loss(source, estimate_source, source_lengths, device, features_model=Non
     # loss = 0 - torch.mean(max_snr)
     # reorder_estimate_source = reorder_source(estimate_source, perms, max_snr_idx)
     # return loss, max_snr, estimate_source, reorder_estimate_source
-    assert features_model is not None
-    loss = calc_deep_feature_loss(source, estimate_source, source_lengths, features_model, device)
-    # loss2 = 0.0 - torch.mean(calc_si_sdr(source, estimate_source, source_lengths))
+    # assert features_model is not None
+    # loss = calc_deep_feature_loss(source, estimate_source, source_lengths, features_model, device)
+    loss = 0.0 - torch.mean(calc_si_sdr(source, estimate_source, source_lengths))
     # import GPUtil
     # GPUtil.showinitialization()
     return loss
