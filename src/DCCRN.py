@@ -18,6 +18,16 @@ class DCCRN(nn.Module):
         self.fft_length = fft_length
         self.hop_size = hop_size
         self.window = window
+        self.num_convs = num_convs
+        self.enc_channel_list = enc_channel_list
+        self.dec_channel_list = dec_channel_list
+        self.freq_kernel_size = freq_kernel_size
+        self.time_kernel_size = time_kernel_size
+        self.stride = stride
+        self.dilation = dilation
+        self.norm_type = norm_type
+        self.rnn_type = rnn_type
+        self.num_layers_rnn = num_layers_rnn
         self.mask_type = mask_type
 
         self.stft_obj = STFT(self.fft_length, self.hop_size, self.window_length, self.window)
@@ -31,7 +41,6 @@ class DCCRN(nn.Module):
         rnn_hidden_size = int(enc_channel_list[-1] * 2)  # downsample to size of channels
         rnn_input_size = rnn_hidden_size * freq_size_dilated
         self.separator = Separator(rnn_type, num_layers_rnn, rnn_input_size, rnn_hidden_size)
-
 
     def forward(self, waveform):
         # TODO: Check difference between Conv-STFT and torch.stft
@@ -51,6 +60,44 @@ class DCCRN(nn.Module):
         decoded_phase = torch.cat((stft_phase_dc, decoded_phase), dim=1)
         clean_waveform = self.stft_obj.inverse(decoded_mag.squeeze(1), decoded_phase.squeeze(1))
         return clean_waveform
+
+    @classmethod
+    def load_model(cls, path):
+        # Load to CPU
+        package = torch.load(path, map_location=lambda storage, loc: storage)
+        model = cls.load_model_from_package(package)
+        return model
+
+    @classmethod
+    def load_model_from_package(cls, package):
+        model = cls(package['fft_length'], package['window_length'], package['hop_size'], package['num_convs'],
+                    package['enc_channel_list'], package['dec_channel_list'], package['freq_kernel_size'],
+                    package['time_kernel_size'], package['stride'], package['dilation'], package['norm_type'],
+                    package['rnn_type'], package['num_layers_rnn'], package['mask_type'])
+        model.load_state_dict(package['state_dict'])
+        return model
+
+    @staticmethod
+    def serialize(model, optimizer, epoch, tr_loss=None, cv_loss=None):
+        package = {
+            # hyper-parameter
+            'fft_length': model.fft_length, 'window_length': model.window_length, 'hop_size': model.hop_size,
+            'num_convs': model.num_convs,
+            'enc_channel_list': model.enc_channel_list, 'dec_channel_list': model.dec_channel_list,
+            'freq_kernel_size': model.freq_kernel_size, 'time_kernel_size': model.time_kernel_size,
+            'stride': model.stride, 'dilation': model.dilation, 'norm_type': model.norm_type,
+            'rnn_type': model.rnn_type,
+            'num_layers_rnn': model.num_layers_rnn, 'mask_type': model.mask_type,
+            # state
+            'state_dict': model.state_dict(),
+            'optim_dict': optimizer.state_dict(),
+            'epoch': epoch
+        }
+        if tr_loss is not None:
+            package['tr_loss'] = tr_loss
+            package['cv_loss'] = cv_loss
+        return package
+
 
 def get_mask(mask_real, mask_imag, input_real, input_imag, mask_type):
     """ See paper to understand what each mask type means """
