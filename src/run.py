@@ -14,22 +14,21 @@ from src.data import AudioDataset, AudioDataLoader
 
 # To open visdom, run this command: "python -m visdom.server", and then open http://localhost:8097
 
-# data_dir = "../egs/SE_dataset/"
+data_dir = "../egs/SE_dataset/"
 # json_dir = "../egs/SE_dataset/"
-data_dir = "../egs/Librispeech_SE_dataset/"
 
 train_dir = data_dir + "tr"
 valid_dir = data_dir + "cv"
 test_dir = data_dir + "tt"
 
 id = 0
-epochs = 50
+epochs = 100
 
 # save and visualize
 
 continue_from = ""
-model_path = "test.pth"
-model_features_path = "../egs/models/loss_models/librispeech_pretrained_v2.pth"
+model_path = "DCCRN_sr_16k_batch_16.pth"
+model_features_path = ""
 
 if __name__ == '__main__':
     sample_rate = 16000
@@ -38,7 +37,7 @@ if __name__ == '__main__':
     json_dir = check_dataset_dir
     # preprocess(data_dir, json_dir, sample_rate)
 
-    batch_size = 3
+    batch_size = 16
     max_hours = None
     num_workers = 4
     # check_dataset_dir = "../egs/Librispeech_SE_dataset/tr"
