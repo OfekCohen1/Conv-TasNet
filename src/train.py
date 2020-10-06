@@ -36,7 +36,7 @@ def train(data_dir, epochs, batch_size, model_path, model_features_path, max_hou
     time_kernel_size = 2
     stride = (2, 1)
     dilation = 1
-    norm_type = 'real_BN'
+    norm_type = 'BN'
     rnn_type = 'LSTM'
     num_layers = 2
     mask_type = 'E'

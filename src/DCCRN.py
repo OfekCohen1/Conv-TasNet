@@ -292,9 +292,10 @@ class SemiCausalConvTranspose(nn.Module):
 
 
 def choose_norm(norm_type, channel_size):
-    # if norm_type == "complex_BN":
-    #     return ComplexBatchNorm  # TODO: Implement Complex BN
-    assert norm_type == 'real_BN'
+    if norm_type == "CLN":
+        return ChannelwiseLayerNorm(channel_size)
+    else:
+        assert norm_type == 'BN'  # either CLN or BN. both are
     return RealBatchNorm(channel_size)
 
 
@@ -304,10 +305,46 @@ class RealBatchNorm(nn.Module):
 
     def __init__(self, channel_size):
         super(RealBatchNorm, self).__init__()
-        self.batch_norm = nn.BatchNorm2d(channel_size)
+        self.batch_norm_real = nn.BatchNorm2d(channel_size)
+        self.batch_norm_imag = nn.BatchNorm2d(channel_size)
 
     def forward(self, real_input, imag_input):
-        return self.batch_norm(real_input), self.batch_norm(imag_input)
+        return self.batch_norm_real(real_input), self.batch_norm_imag(imag_input)
+
+
+class ChannelwiseLayerNorm(nn.Module):
+    """Channel-wise Layer Normalization (cLN)"""
+
+    def __init__(self, channel_size):
+        super(ChannelwiseLayerNorm, self).__init__()
+        self.gamma_real = nn.Parameter(torch.Tensor(1, channel_size, 1, 1))
+        self.beta_real = nn.Parameter(torch.Tensor(1, channel_size, 1, 1))
+        self.gamma_imag = nn.Parameter(torch.Tensor(1, channel_size, 1, 1))
+        self.beta_imag = nn.Parameter(torch.Tensor(1, channel_size, 1, 1))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        self.gamma_real.data.fill_(1)
+        self.gamma_imag.data.fill_(1)
+        self.beta_real.data.zero_()
+        self.beta_imag.data.zero_()
+
+    def forward(self, y_real, y_imag):
+        """
+        Args:
+            y: [M, N, K], M is batch size, N is channel size, K is length
+        Returns:
+            cLN_y: [M, N, K]
+        """
+        mean_real = torch.mean(y_real, dim=1, keepdim=True)  # [M, 1, Freq, T]
+        var_real = torch.var(y_real, dim=1, keepdim=True, unbiased=False)  # [M, 1, Freq, T]
+        cLN_y_real = self.gamma_real * (y_real - mean_real) / torch.pow(var_real + EPS, 0.5) + self.beta_real
+
+        mean_imag = torch.mean(y_imag, dim=1, keepdim=True)  # [M, 1, Freq, T]
+        var_imag = torch.var(y_imag, dim=1, keepdim=True, unbiased=False)  # [M, 1, Freq, T]
+        cLN_y_imag = self.gamma_imag * (y_imag - mean_imag) / torch.pow(var_imag + EPS, 0.5) + self.beta_imag
+
+        return cLN_y_real, cLN_y_imag
 
 
 class Chomp2d(nn.Module):
