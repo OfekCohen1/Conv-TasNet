@@ -128,7 +128,7 @@ class DPRNN(nn.Module):
 
         rest = segment_size - (segment_stride + seq_len % segment_size) % segment_size
         if rest > 0:
-            pad = Variable(torch.zeros(batch_size, dim, rest)).type(input.conv_type())
+            pad = Variable(torch.zeros(batch_size, dim, rest)).type(input.type())
             input = torch.cat([input, pad], 2)
 
         pad_aux = Variable(torch.zeros(batch_size, dim, segment_stride)).type(input.type())

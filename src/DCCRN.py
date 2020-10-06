@@ -41,6 +41,9 @@ class DCCRN(nn.Module):
         rnn_hidden_size = int(enc_channel_list[-1] * 2)  # downsample to size of channels
         rnn_input_size = rnn_hidden_size * freq_size_dilated
         self.separator = Separator(rnn_type, num_layers_rnn, rnn_input_size, rnn_hidden_size)
+        for p in self.parameters():
+            if p.dim() > 1:
+                nn.init.xavier_normal_(p)
 
     def forward(self, waveform):
         # TODO: Check difference between Conv-STFT and torch.stft
@@ -70,11 +73,12 @@ class DCCRN(nn.Module):
 
     @classmethod
     def load_model_from_package(cls, package):
-        model = cls(package['fft_length'], package['window_length'], package['hop_size'], package['num_convs'],
-                    package['enc_channel_list'], package['dec_channel_list'], package['freq_kernel_size'],
-                    package['time_kernel_size'], package['stride'], package['dilation'], package['norm_type'],
-                    package['rnn_type'], package['num_layers_rnn'], package['mask_type'])
+        model = cls(package['fft_length'], package['window_length'], package['hop_size'], package['window'],
+                    package['num_convs'], package['enc_channel_list'], package['dec_channel_list'],
+                    package['freq_kernel_size'], package['time_kernel_size'], package['stride'], package['dilation'],
+                    package['norm_type'], package['rnn_type'], package['num_layers_rnn'], package['mask_type'])
         model.load_state_dict(package['state_dict'])
+
         return model
 
     @staticmethod
@@ -82,7 +86,7 @@ class DCCRN(nn.Module):
         package = {
             # hyper-parameter
             'fft_length': model.fft_length, 'window_length': model.window_length, 'hop_size': model.hop_size,
-            'num_convs': model.num_convs,
+            'window': model.window, 'num_convs': model.num_convs,
             'enc_channel_list': model.enc_channel_list, 'dec_channel_list': model.dec_channel_list,
             'freq_kernel_size': model.freq_kernel_size, 'time_kernel_size': model.time_kernel_size,
             'stride': model.stride, 'dilation': model.dilation, 'norm_type': model.norm_type,
