@@ -27,7 +27,7 @@ epochs = 100
 # save and visualize
 
 continue_from = ""
-model_path = "DCCRN_sr_16k_batch_16_correct_BN.pth"
+model_path = "DCCRN_DS_sr_16k_batch_32_BN.pth"
 model_features_path = ""
 
 if __name__ == '__main__':
@@ -37,7 +37,7 @@ if __name__ == '__main__':
     json_dir = check_dataset_dir
     # preprocess(data_dir, json_dir, sample_rate)
 
-    batch_size = 16
+    batch_size = 32
     max_hours = None
     num_workers = 4
     # check_dataset_dir = "../egs/Librispeech_SE_dataset/tr"

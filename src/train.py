@@ -10,6 +10,7 @@ from src.solver import Solver
 from src.conv_tasnet import ConvTasNet
 from src.DPRNN_model import DPRNN
 from src.DCCRN import DCCRN
+from src.DCCRN_test1 import DCRNN_DS
 from torch.utils.data.dataset import random_split
 import math
 from src.deepspeech_model import DeepSpeech
@@ -77,7 +78,7 @@ def train(data_dir, epochs, batch_size, model_path, model_features_path, max_hou
 
     # Datasets and Dataloaders
     tr_cv_dataset = AudioDataset(train_dir, batch_size,
-                              sample_rate=sample_rate, segment=segment_len, max_hours=max_hours)
+                                 sample_rate=sample_rate, segment=segment_len, max_hours=max_hours)
     cv_len = int(0.2 * math.ceil(len(tr_cv_dataset)))
     tr_dataset, cv_dataset = random_split(tr_cv_dataset, [len(tr_cv_dataset) - cv_len, cv_len])
 
@@ -88,8 +89,8 @@ def train(data_dir, epochs, batch_size, model_path, model_features_path, max_hou
                                 num_workers=num_workers)
     data = {'tr_loader': tr_loader, 'cv_loader': cv_loader}
 
-    model = DCCRN(fft_len, win_len, hop_size, window, num_convs, enc_list, dec_list, freq_kernel_size,
-                  time_kernel_size,stride, dilation, norm_type, rnn_type, num_layers, mask_type)
+    model = DCRNN_DS(fft_len, win_len, hop_size, window, num_convs, enc_list, dec_list, freq_kernel_size,
+                     time_kernel_size, stride, dilation, norm_type, rnn_type, num_layers, mask_type)
 
     if use_cuda:
         model = torch.nn.DataParallel(model)

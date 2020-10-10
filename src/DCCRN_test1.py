@@ -9,12 +9,13 @@ import time
 EPS = 1e-8
 
 
+# This module includes depthwise separable convs/deconvs in Enc/Dec, as opposed to regular convs
 # TODO: Write shapes of every input/output in modules
 
-class DCCRN(nn.Module):
+class DCRNN_DS(nn.Module):
     def __init__(self, fft_length, window_length, hop_size, window, num_convs, enc_channel_list, dec_channel_list,
                  freq_kernel_size, time_kernel_size, stride, dilation, norm_type, rnn_type, num_layers_rnn, mask_type):
-        super(DCCRN, self).__init__()
+        super(DCRNN_DS, self).__init__()
         self.window_length = window_length
         self.fft_length = fft_length
         self.hop_size = hop_size
@@ -32,7 +33,6 @@ class DCCRN(nn.Module):
         self.mask_type = mask_type
 
         self.stft_obj = STFT(self.fft_length, self.hop_size, self.window_length, self.window)
-        # self.stft_obj.pad_amount = 0  # to make sure that STFT is causal
         self.encoder = Encoder(num_convs, enc_channel_list, freq_kernel_size, time_kernel_size, stride,
                                norm_type, dilation=dilation)
         channel_size_decoder = []
@@ -54,6 +54,7 @@ class DCCRN(nn.Module):
         stft_mag_no_dc, stft_phas_no_dc = stft_mag[:, 1:, :], stft_phase[:, 1:, :]  # Remove DC
         stft_real, stft_imag = stft_mag_no_dc * torch.cos(stft_phas_no_dc), stft_mag_no_dc * torch.sin(stft_phas_no_dc)
         stft_real, stft_imag = stft_real.unsqueeze(1), stft_imag.unsqueeze(1)
+
         # t1 = time.time()
         encoded_real, encoded_imag, skip_list_real, skip_list_imag = self.encoder(stft_real, stft_imag)
         # t2 = time.time()
@@ -64,10 +65,6 @@ class DCCRN(nn.Module):
         # print('Inference time for 4s input {0:s}: {1:.2f} seconds'.format("Encoder", t2 - t1))
         # print('Inference time for 4s input {0:s}: {1:.2f} seconds'.format("Separator", t3 - t2))
         # print('Inference time for 4s input {0:s}: {1:.2f} seconds'.format("Decoder", t4 - t2))
-        # from src.evaluate import calc_num_params
-        # print(calc_num_params(self.encoder))
-        # print(calc_num_params(self.separator))
-        # print(calc_num_params(self.decoder))
 
         decoded_mag, decoded_phase = get_mask(mask_real, mask_imag, stft_real, stft_imag, self.mask_type)
         decoded_mag, decoded_phase = decoded_mag.squeeze(1), decoded_phase.squeeze(1)
@@ -212,8 +209,8 @@ class Separator(nn.Module):
         #  Concat real and imaginary, currently no complex LSTM
         concat_input = torch.cat((encoded_real, encoded_imag), dim=1)
         B, N, F, T = concat_input.shape
-        concat_input = concat_input.view(B, -1, T).permute(0, 2, 1)  # [B, T, NF]
-        output_separator = self.dense(self.rnn(concat_input)[0]).permute(0, 2, 1)  # input to dense is also [B T NF]
+        concat_input = concat_input.view(B, -1, T).permute(0, 2, 1)
+        output_separator = self.dense(self.rnn(concat_input)[0]).permute(0, 2, 1)
         output_separator = output_separator.view(B, N, F, T)
         separated_real, separated_imag = output_separator[:, :N // 2, :, :], output_separator[:, N // 2:, :, :]
         return separated_real, separated_imag
@@ -229,8 +226,10 @@ class ComplexConvNormAct(nn.Module):
         :param dilation: defualt is 1
         """
         super(ComplexConvNormAct, self).__init__()
-        self.conv_real = CausalConv(input_size, output_size, freq_kernel_size, time_kernel_size, stride, dilation)
-        self.conv_imag = CausalConv(input_size, output_size, freq_kernel_size, time_kernel_size, stride, dilation)
+        self.conv_real = CausalDSConv(input_size, output_size, freq_kernel_size, time_kernel_size, stride,
+                                      dilation)
+        self.conv_imag = CausalDSConv(input_size, output_size, freq_kernel_size, time_kernel_size, stride,
+                                      dilation)
         self.norm = choose_norm(norm_type, output_size)
         self.act_real = nn.PReLU()
         self.act_imag = nn.PReLU()
@@ -254,10 +253,10 @@ class ComplexConvTransposedNormAct(nn.Module):
         :param dilation: defualt is 1
         """
         super(ComplexConvTransposedNormAct, self).__init__()
-        self.conv_transp_real = SemiCausalConvTranspose(input_size, output_size, freq_kernel_size, time_kernel_size,
-                                                        stride, dilation)
-        self.conv_transp_imag = SemiCausalConvTranspose(input_size, output_size, freq_kernel_size, time_kernel_size,
-                                                        stride, dilation)
+        self.conv_transp_real = SemiCausalDSConvTranspose(input_size, output_size, freq_kernel_size, time_kernel_size,
+                                                          stride, dilation)
+        self.conv_transp_imag = SemiCausalDSConvTranspose(input_size, output_size, freq_kernel_size, time_kernel_size,
+                                                          stride, dilation)
         self.norm = choose_norm(norm_type, output_size)
         self.act_real = nn.PReLU()
         self.act_imag = nn.PReLU()
@@ -271,40 +270,77 @@ class ComplexConvTransposedNormAct(nn.Module):
         return output_real, output_imag
 
 
-class CausalConv(nn.Module):
-    """Causal Convolution block."""
+class CausalDSConv(nn.Module):
+    """Causal Depthwise Separable Convolution block."""
 
     def __init__(self, input_size, output_size, freq_kernel_size, time_kernel_size,
                  stride, dilation=1):
-        super(CausalConv, self).__init__()
+        super(CausalDSConv, self).__init__()
         padding_freq = (freq_kernel_size - 1) * dilation // 2  # Freq axis is not causal -> half padding and no chomp
         padding_time = (time_kernel_size - 1) * dilation
-        conv2d = nn.Conv2d(input_size, output_size, (freq_kernel_size, time_kernel_size), stride,
-                           (padding_freq, padding_time), dilation)
+        depthwise_conv2d = nn.Conv2d(input_size, input_size, (freq_kernel_size, time_kernel_size), stride,
+                                     (padding_freq, padding_time), dilation, groups=input_size)
+        pointwise_conv2d = nn.Conv2d(input_size, output_size, (1, 1))
         chomp_time = Chomp2d(padding_time, 'conv')
-        self.causal_conv = nn.Sequential(conv2d, chomp_time)
+        self.causal_ds_conv = nn.Sequential(depthwise_conv2d, chomp_time, pointwise_conv2d)
 
     def forward(self, input_tensor):
-        return self.causal_conv(input_tensor)
+        return self.causal_ds_conv(input_tensor)
 
 
-class SemiCausalConvTranspose(nn.Module):
-    """semi Causal Transposed Convolution block. looks one frame ahead"""
+class SemiCausalDSConvTranspose(nn.Module):
+    """semi Causal Transposed Depthwise Separable Convolution block. looks one frame ahead"""
 
     def __init__(self, input_size, output_size, freq_kernel_size, time_kernel_size,
                  stride, dilation=1):
-        super(SemiCausalConvTranspose, self).__init__()
+        super(SemiCausalDSConvTranspose, self).__init__()
         padding_freq = (freq_kernel_size - 1) * dilation // 2  # Freq axis is not causal -> half padding and no chomp
         padding_time = (time_kernel_size - 1) * dilation // 2  # In convTranspose pad half (semi causal, not causal)
         chomp_size = (time_kernel_size - 1) * dilation  # cut 1 frame
-        output_padding = (1, 0)  # Fix output dimensions. only needed if we remove DC
-        conv_trans_2d = nn.ConvTranspose2d(input_size, output_size, (freq_kernel_size, time_kernel_size), stride,
-                                           (padding_freq, padding_time), output_padding, dilation=dilation)
+        output_padding = (1, 0)  # Fix output dimensions. only needed since we remove DC
+        # Notice we first use the pointwise conv to reduce the number of channels
+        pointwise_conv_trans_2d = nn.ConvTranspose2d(input_size, output_size, (1, 1))
+        depthwise_conv_trans_2d = nn.ConvTranspose2d(output_size, output_size, (freq_kernel_size, time_kernel_size),
+                                                     stride, (padding_freq, padding_time), output_padding,
+                                                     dilation=dilation, groups=output_size)
+
         chomp_time = Chomp2d(chomp_size, 'deconv')
-        self.semi_causal_conv_transpose = nn.Sequential(conv_trans_2d, chomp_time)
+        self.semicausal_conv_ds_transpose = nn.Sequential(pointwise_conv_trans_2d, depthwise_conv_trans_2d, chomp_time)
 
     def forward(self, input_tensor):
-        return self.semi_causal_conv_transpose(input_tensor)
+        return self.semicausal_conv_ds_transpose(input_tensor)
+
+
+# class CausalSEBlock(nn.Module):
+#     """ Causal Squeeze and Excitation block.
+#      Uses a causal conv to imitate the global pooling from original SE"""
+#
+#     def __init__(self, channel_size, conv_kernel, conv_stride, conv_dilation, r):
+#         super(CausalSEBlock, self).__init__()
+#         padding = (conv_kernel - 1) * conv_dilation
+#         # downsample convolution is depthwise - should not calc over channels.
+#         downsample_conv = nn.Conv1d(channel_size, channel_size, conv_kernel, stride=conv_stride, padding=padding,
+#                                     dilation=conv_dilation, groups=channel_size)
+#         chomp_time = Chomp1d(padding)
+#         self.causal_downsample_conv = nn.Sequential(downsample_conv, chomp_time)
+#         fc1 = nn.Linear(channel_size, channel_size)
+#         fc2 = nn.Linear(channel_size, channel_size)
+#         self.weights_net = nn.Sequential(fc1, nn.ReLU())
+#
+#     def forward(self, input):
+#         weights = input  # [B,C,F,T]
+#         # pool over frequency dimension
+#         weights = torch.mean(weights, dim=2)  # [B,C,T]
+#         # Squeeze time dimension
+#         B, C, T = weights.shape
+#         # weights = self.causal_downsample_conv(weights)
+#         # Excitation to get weights for channels
+#         weights = weights.view(B, T, C)
+#         weights = self.weights_net(weights)
+#         weights = weights.view(B, C, T)
+#         weights = weights.unsqueeze(2)  # Add frequency dimension back
+#         output = input * weights
+#         return output
 
 
 def choose_norm(norm_type, channel_size):
@@ -363,6 +399,23 @@ class ChannelwiseLayerNorm(nn.Module):
         return cLN_y_real, cLN_y_imag
 
 
+class Chomp1d(nn.Module):
+    """To ensure the convolution is causal"""
+
+    def __init__(self, chomp_size):
+        super(Chomp1d, self).__init__()
+        self.chomp_size = chomp_size
+
+    def forward(self, x):
+        """
+        Args:
+            x: [M, H, Kpad]
+        Returns:
+            [M, H, K]
+        """
+        return x[:, :, :-self.chomp_size].contiguous()
+
+
 class Chomp2d(nn.Module):
     """To ensure the output length is the same as the input. only chomps in time axis
     if causal - chomp from the front
@@ -399,8 +452,8 @@ if __name__ == '__main__':
     num_convs = 6
 
     fft_length = 512
-    window_length = int(25e-3 * sample_rate)  # 400
-    hop_size = int(6.25e-3 * sample_rate)  # 100
+    hop_size = int(6.25e-3 * sample_rate)
+    window_length = int(25e-3 * sample_rate)
     window = 'hann'
 
     # waveform = torch.randn((B, T)).float()
@@ -408,43 +461,34 @@ if __name__ == '__main__':
     # stft_real, stft_imag = stft_real_imag[:, :, :, 0], stft_real_imag[:, :, :, 1]
     # stft_real = stft_real[:, 1:, :].unsqueeze(1)  # Remove DC
     # stft_imag = stft_imag[:, 1:, :].unsqueeze(1)  # Remove DC
-    #
-    # enc = Encoder(6, enc_list, 5, 2, (2, 1), 'BN')
+
+    enc = Encoder(6, enc_list, 5, 2, (2, 1), 'BN')
     # enc.eval()
     # output_real, output_imag, out_real_list, out_imag_list = enc(stft_real, stft_imag)
-    # # stft_real[:, :, :, 100:] = 0
+    # stft_real[:, :, :, 100:] = 0
     # output_real2, output_imag2, out_real_list2, out_imag_list2 = enc(stft_real, stft_imag)
+    # print(stft_real.shape)
+    # print(output_real.shape)
+    # print(output_real2.shape)
     # print(torch.equal(output_real[:, :, :, 0:100], output_real2[:, :, :, 0:100]))
-    #
-    # separator = Separator('LSTM', 2, 1024, 256)
-    # separator.eval()
-    # sep_real, sep_imag = separator(output_real2, output_imag2)
-    # # output_real2[:, :, :, 100:] = 0
-    # sep_real2, sep_imag2 = separator(output_real2, output_imag2)
-    # print(torch.equal(sep_real[:, :, :, 0:100], sep_real2[:, :, :, 0:100]))
-    #
-    # dec = Decoder(6, dec_list, 5, 2, (2, 1), 'BN')
+
+    dec = Decoder(6, dec_list, 5, 2, (2, 1), 'BN')
     # dec.eval()
-    # dec_real, dec_imag = dec(sep_real2, sep_imag2, out_real_list2, out_imag_list2)
+    # dec_real, dec_imag = dec(output_real2, output_imag2, out_real_list2, out_imag_list2)
     # output_real2[:, :, :, 100:] = 0
-    # dec_real2, dec_imag2 = dec(sep_real2, sep_imag2, out_real_list2, out_imag_list2)
+    # dec_real2, dec_imag2 = dec(output_real2, output_imag2, out_real_list2, out_imag_list2)
     # print(torch.equal(dec_real[:, :, :, 0:95], dec_real2[:, :, :, 0:95]))
+    # print(stft_real.shape)
+    # print(dec_real.shape)
     #
 
-    # calc_num_params(enc)
-    # calc_num_params(dec)
+    print(calc_num_params(enc))
+    print(calc_num_params(dec))
 
-    model = DCCRN(fft_length, window_length, hop_size, window, num_convs, enc_list, dec_list, 5, 2, (2, 1), 1,
+    model = DCRNN_DS(fft_length, window_length, hop_size, window, num_convs, enc_list, dec_list, 5, 2, (2, 1), 1,
                   'BN', 'LSTM', 2, 'E')
-    model.eval()
-
-    waveform = torch.randn([4, 32000])
-    output = model(waveform)
-    waveform[:, 1399:] = 0
-    output2 = model(waveform)
-    print(torch.equal(output[:, 0:500], output2[:, 0:500]))
     print("Model size is:" + str(calc_num_params(model)))
-    bla2 = model(waveform)
+    # bla2 = model(waveform)
 
     # # Test causality of conv layer
     # conv_layer = CausalConv(1, 32, 5, 2, (2, 1))
@@ -463,3 +507,34 @@ if __name__ == '__main__':
     # bla[:, :, :, 100:] = 0
     # bla4 = deconv_layer(bla)
     # print(torch.equal(bla3[:, :, :, 0:99], bla4[:, :, :, 0:99]))
+
+    # block1 = CausalSEBlock(16, 9, 1, 1, 2)
+    #
+    # sig = torch.ones(4, 16, 256, 6400)
+    # output = block1(sig)
+    #
+    # sig[:, :, :, 100:] = 0
+    # output2 = block1(sig)
+    #
+    # # TODO: Find out why linear layer isn't causal
+    # print(torch.sum(output2[:, :, :, 0:100] - output[:, :, :, 0:100]))
+
+    block1 = nn.Linear(16, 16, bias=True)
+
+    sig = torch.ones(4, 16, 256, 6400)
+    # sig = sig.view(4, 256, 6400, 16)
+    sig = sig.permute(0, 2, 3, 1)  # [4,256,6400,16]
+    output = block1(sig)
+    sig = sig.permute(0, 3, 1, 2)  # [4,16,256,6400]
+    output = output.permute(0,3,1,2)  # [4,16,256,6400]
+
+    sig[:, :, :, 100:] = 0
+    sig = sig.permute(0, 2, 3, 1)  # [4,256,6400,16]
+    output2 = block1(sig)
+    sig = sig.permute(0, 3, 1, 2)  # [4,16,256,6400]
+    output2 = output2.permute(0,3,1,2)  # [4,16,256,6400]
+
+    print(torch.sum(output2[:, :, :, 0:100] - output[:, :, :, 0:100]))
+
+    # TODO: after depthwise separable convs, enc and dec are rly small. Maybe use SUDORMRF as separator.
+

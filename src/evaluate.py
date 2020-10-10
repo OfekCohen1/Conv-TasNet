@@ -9,6 +9,7 @@ import json
 from pystoi import stoi
 from pesq import pesq
 import pysepm
+import time
 
 from src.pit_criterion import calc_si_sdr
 from src.separate import separate
@@ -18,7 +19,7 @@ import math
 
 
 def mapped_mos2raw_mos(mapped):
-    return (math.log(4.0/(mapped - 0.999) - 1.0) - 4.6607) / (-1.4945)
+    return (math.log(4.0 / (mapped - 0.999) - 1.0) - 4.6607) / (-1.4945)
 
 
 def evaluate(est_dir, clean_dir, sample_rate):
@@ -55,8 +56,8 @@ def evaluate(est_dir, clean_dir, sample_rate):
             sorted_clean_infos)
         pesq_test = pesq_test + pesq(sample_rate, clean_source, est_source, 'wb') / len(sorted_clean_infos)
         # pesq_test = pesq_test + pesq(clean_source, est_source, sample_rate) / len(sorted_clean_infos)
-        pesq_test = pesq_test + (pysepm.pesq(clean_source,est_source, sample_rate)[0]) / len(sorted_clean_infos)
-        pesq_test2 = pesq_test2 + (pysepm.pesq(clean_source,est_source, sample_rate)[1]) / len(sorted_clean_infos)
+        pesq_test = pesq_test + (pysepm.pesq(clean_source, est_source, sample_rate)[0]) / len(sorted_clean_infos)
+        pesq_test2 = pesq_test2 + (pysepm.pesq(clean_source, est_source, sample_rate)[1]) / len(sorted_clean_infos)
 
         stoi_test = stoi_test + stoi(clean_source, est_source, sample_rate) / len(sorted_clean_infos)
     #
@@ -71,15 +72,15 @@ def calc_num_params(model):
     num_params = 0
     for paramter in model.parameters():
         num_params += torch.numel(paramter)
-    print("Model size is:" + str(num_params / 1e6))
-    return num_params/1e6
+    # print("Model size is:" + str(num_params / 1e6))
+    return num_params / 1e6
 
 
 def create_input_for_model(batch_size, sample_length, model_type):
     if model_type == 'TASNET' or model_type == 'DPRNN' or model_type == 'TPRNN':
         dummy_input = torch.rand(batch_size, sample_length)
-    else:  # In the future add other models
-        dummy_input = torch.rand(batch_size, sample_length)
+    else:  # Currently only SUDORMRF
+        dummy_input = torch.rand(batch_size, 1, sample_length)
     return dummy_input
 
 
@@ -95,6 +96,20 @@ def count_macs_for_forward(model, model_name, mode='cpu',
     macs, _ = profile(model, inputs=(mixture,))
     print('GMACS: {}'.format(round(macs / 10 ** 9, 3)))
     return macs
+
+
+def count_time_inference(model, model_name, mode='cpu', sample_length=16000*4, batch_size=1):
+    mixture = create_input_for_model(batch_size, sample_length,
+                                     model_name)
+    mixture.unsqueeze(0)
+    N = 10
+    delta_t = 0
+    for i in range(N):
+        t1 = time.time()
+        output = model(mixture)
+        t2 = time.time()
+        delta_t = delta_t + (t2-t1) / N
+    print('Inference time for 4s input {0:s}: {1:.2f} seconds'.format(model_name, delta_t))
 
 
 if __name__ == '__main__':
@@ -113,20 +128,63 @@ if __name__ == '__main__':
     # separate(model_path, noisy_dir, noisy_json, est_dir, use_cuda, sample_rate, batch_size)
     # preprocess_one_dir(est_dir, est_dir, 'est', sample_rate=sample_rate)
     # preprocess_one_dir(clean_dir, clean_dir, 'clean', sample_rate=sample_rate)
-    est_dir = "../egs/SE_dataset/tt/synthetic/no_reverb/noisy"
-    evaluate(est_dir, clean_dir, sample_rate)
+    # est_dir = "../egs/SE_dataset/tt/synthetic/no_reverb/noisy"
+    # evaluate(est_dir, clean_dir, sample_rate)
+
+    from src.DPRNN_model import DPRNN
+
+    dprnn_path = "../egs/models/DPRNN_SE_LSTM_N_64_B_96_hidden_128_chunk_180_L_6_sr_16k.pth"
+    model_dprnn = DPRNN.load_model(dprnn_path)
+    model_dprnn.eval()
+
+    from src.conv_tasnet import ConvTasNet
+
+    tasnet_path = "../egs/models/speech_enhancement_si_sdr.pth"
+    model_tasnet = ConvTasNet.load_model(tasnet_path)
+    model_tasnet.eval()
 
     from src.DCCRN import DCCRN
-    # model_path = "../egs/models/TPRNN_SE_GRU_N_128_B_256_hidden_256_layers_3_L_6_sr_8k_batch_256_hours_30.pth"
-    # model_tprnn = DCCRN.load_model(model_path)
+
+    dccrn_path = "../egs/models/DCCRN_sr_16k_batch_16_correct_BN.pth"
+    model_dcrnn = DCCRN.load_model(dccrn_path)
+    model_dcrnn.eval()
+
+    from src.sudo_rm_rf import SuDORMRF
+
+    model_sudormrf = SuDORMRF(out_channels=256,
+                              in_channels=512,
+                              num_blocks=8,
+                              upsampling_depth=5,
+                              enc_kernel_size=21,
+                              enc_num_basis=512,
+                              num_sources=2)
+    model_sudormrf.eval()
+
+    from src.DCCRN_test1 import DCRNN_DS
+    dccrn_ds_path = "../egs/models/DCRNN_DS_test.pth"
+    model_dcrnn_ds = DCRNN_DS.load_model(dccrn_ds_path)
+    model_dcrnn_ds .eval()
 
     # macs_dprnn = count_macs_for_forward(model_dprnn, 'DPRNN', mode='cpu')
     # macs_tasnet = count_macs_for_forward(model_tasnet, 'TASNET', mode='cpu')
-    # macs_tprnn = count_macs_for_forward(model_tprnn, 'TPRNN', mode='cpu')
+    # macs_sudormrf = count_macs_for_forward(model_sudormrf, 'SUDORMRF', mode='cpu')
+    # macs_dccrn = count_macs_for_forward(model_dcrnn, 'DCCRN', mode='cpu')
+    # macs_dcrnn_ds = count_macs_for_forward(model_dcrnn_ds,'DCRNN Depthwise convs', mode='cpu')
     #
     # print('DPRNN GMACS: {0:.2f}, number of parameters: {1:.2f} M'
     #       .format(round(macs_dprnn / 10 ** 9, 3), calc_num_params(model_dprnn)))
     # print('Tasnet GMACS: {0:.2f}, number of parameters: {1:.2f} M'
     #       .format(round(macs_tasnet / 10 ** 9, 3), calc_num_params(model_tasnet)))
-    # print('TPRNN GMACS: {0:.2f}, number of parameters: {1:.2f} M'
-    #       .format(round(macs_tprnn / 10 ** 9, 3), calc_num_params(model_tprnn)))
+    # print('SUDORMRF GMACS: {0:.2f}, number of parameters: {1:.2f} M'
+    #       .format(round(macs_sudormrf / 10 ** 9, 3), calc_num_params(model_sudormrf)))
+    # print('DCCRN GMACS: {0:.2f}, number of parameters: {1:.2f} M'
+    #       .format(round(macs_dccrn / 10 ** 9, 3), calc_num_params(model_dcrnn)))
+    # print('DCCRN DS GMACS: {0:.2f}, number of parameters: {1:.2f} M'
+    #       .format(round(macs_dcrnn_ds / 10 ** 9, 3), calc_num_params(model_dcrnn_ds)))
+
+    # count_time_inference(model_dprnn, 'DPRNN')
+    # count_time_inference(model_tasnet, 'TASNET')
+    # count_time_inference(model_sudormrf, 'SUDORMRF')
+    count_time_inference(model_dcrnn, 'DCCRN')
+    count_time_inference(model_dcrnn_ds, 'DCCRN DS')
+
